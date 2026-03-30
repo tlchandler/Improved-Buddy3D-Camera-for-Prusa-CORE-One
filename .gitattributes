@@ -1,0 +1,5 @@
+# Force Unix line endings for all shell scripts and C source.
+# The camera runs /bin/sh which cannot handle Windows \r\n endings.
+*.sh text eol=lf
+*.c text eol=lf
+*.md text eol=lf
