@@ -1,0 +1,29 @@
+# OS files
+Thumbs.db
+.DS_Store
+
+# Runtime files (created on camera, not part of the repo)
+sdcard/buddy_settings.ini
+sdcard/hosts.factory
+sdcard/xhr_config.ini.factory
+sdcard/shadow.factory
+sdcard/snapshots/
+sdcard/timelapse/
+sdcard/logs/
+
+# Development artifacts
+*.exe
+*.jpg
+*.bin
+*.log
+analysis/
+dumps/
+backup/
+docs/superpowers/
+cam_shell.py
+/lp_app.sh
+/lp_app_v2.sh
+
+# Claude Code
+.claude/
+CLAUDE.md
