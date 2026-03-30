@@ -65,6 +65,19 @@ Insert the SD card into the camera and power cycle it. The camera's init system 
 
 Open `http://<camera-ip>/` in your browser. The camera gets its IP from DHCP -- check your router's device list to find it.
 
+### WiFi AP Fallback
+
+If the camera cannot connect to WiFi within 40 seconds of booting, it automatically creates its own wireless access point:
+
+| Setting | Value |
+|---------|-------|
+| SSID | `Buddy3D-Setup` |
+| Password | None (open network) |
+| Camera IP | `192.168.4.1` |
+| DHCP range | `192.168.4.100` - `192.168.4.200` |
+
+Connect to the `Buddy3D-Setup` network from your phone or laptop, then open `http://192.168.4.1/` to access the web UI and configure your WiFi credentials. Once saved, reboot the camera and it will connect to your network normally.
+
 ## Removing the SD Card
 
 Eject the SD card and reboot the camera. It will return to full factory behavior:
