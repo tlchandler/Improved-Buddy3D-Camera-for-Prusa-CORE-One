@@ -369,24 +369,23 @@ cleanup_storage() {
             fi
         fi
     done
+    # Always enforce retention limits
+    # Delete oldest log files (keep last 5)
+    ls -1 "$SD/logs/" 2>/dev/null | grep '\.log$' | sort | head -n -5 | while read f; do rm -f "$SD/logs/$f"; done
+    # Delete oldest snapshots (keep last 20)
+    ls -1 "$SD/snapshots/" 2>/dev/null | grep '\.jpg$' | sort | head -n -20 | while read f; do rm -f "$SD/snapshots/$f"; done
+    # Delete oldest regular timelapse dirs (keep last 3)
+    ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' | sort | head -n -3 | while read d; do
+        rm -rf "$SD/timelapse/$d"
+    done
+
+    # Print timelapse sessions — keep last 10, but aggressively trim at 90% disk
     SD_PCT=$(df "$SD" 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
-    [ -z "$SD_PCT" ] && return
-    if [ "$SD_PCT" -gt 90 ]; then
-        log "Storage at ${SD_PCT}% — running cleanup"
-        # Delete oldest log files (keep last 3)
-        ls -1 "$SD/logs/" 2>/dev/null | grep '\.log$' | sort | head -n -3 | while read f; do rm -f "$SD/logs/$f"; done
-        # Delete oldest snapshots (keep last 20)
-        ls -1 "$SD/snapshots/" 2>/dev/null | grep '\.jpg$' | sort | head -n -20 | while read f; do rm -f "$SD/snapshots/$f"; done
-        # Delete oldest regular timelapse dirs without videos (keep last 3)
-        ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' | sort | head -n -3 | while read d; do
-            [ ! -f "$SD/timelapse/$d/timelapse.mp4" ] && rm -rf "$SD/timelapse/$d"
-        done
-        # Delete oldest print timelapse sessions without videos (keep last 3)
-        ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9]*_[0-9]' | sort | head -n -3 | while read d; do
-            [ ! -f "$SD/timelapse/$d/timelapse.mp4" ] && rm -rf "$SD/timelapse/$d"
-        done
-        log "Cleanup complete — now at $(df "$SD" 2>/dev/null | tail -1 | awk '{print $5}') used"
-    fi
+    PT_KEEP=10
+    [ -n "$SD_PCT" ] && [ "$SD_PCT" -gt 90 ] 2>/dev/null && PT_KEEP=3
+    ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9]*_[0-9]' | sort | head -n -${PT_KEEP} | while read d; do
+        rm -rf "$SD/timelapse/$d"
+    done
 }
 
 # Run cleanup at boot
