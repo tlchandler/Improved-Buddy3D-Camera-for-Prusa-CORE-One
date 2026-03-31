@@ -437,7 +437,7 @@ HTMLEOF
 
 <div class="card">
 <h2>Firmware</h2>
-<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.1.0</span></div>
+<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.1.1</span></div>
 <div class="svc"><span>Kernel</span><span style="color:#889">${KERNEL}</span></div>
 <div class="svc"><span>System Time</span><span style="color:#889">$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)</span></div>
 </div>
