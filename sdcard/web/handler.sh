@@ -132,10 +132,18 @@ button:hover { background:#fb8f67; }
 <p>The camera is not connected to WiFi.<br>Enter your network credentials below.</p>
 APPAGE
     echo "$SAVED_MSG"
+    # WiFi scan in AP mode
+    echo '<div style="margin-bottom:16px"><h3 style="color:#c9d1d9;font-size:1em;margin-bottom:8px">Available Networks</h3>'
+    echo '<div style="max-height:180px;overflow-y:auto;border:1px solid #30363d;border-radius:6px;padding:4px">'
+    iwlist wlan0 scan 2>/dev/null | awk '
+        /ESSID:/ { gsub(/.*ESSID:"/, ""); gsub(/".*/, ""); essid=$0 }
+        /Quality=/ { split($0, a, "="); split(a[2], q, "/"); qual=int(q[1]); printf "%d\t%s\n", qual, essid }
+    ' | sort -rn | awk -F'\t' '!seen[$2]++ { printf "<div style=\"padding:8px;border-bottom:1px solid #30363d;cursor:pointer;font-size:.9em\" onclick=\"document.getElementById(\\\"ap_ssid\\\").value=this.dataset.ssid\" data-ssid=\"%s\"><span style=\"color:#c9d1d9\">%s</span> <span style=\"color:#8b949e;float:right\">%d%%</span></div>\n", $2, $2, $1 }'
+    echo '</div><div style="font-size:.8em;color:#8b949e;margin-top:4px">Tap a network to fill it in below.</div></div>'
     cat << 'APPAGE2'
 <form method="POST" action="/save/wifi">
 <label>WiFi Network Name (SSID)</label>
-<input type="text" name="wifi_ssid" placeholder="MyNetwork" required>
+<input type="text" name="wifi_ssid" id="ap_ssid" placeholder="MyNetwork" required>
 <label>WiFi Password</label>
 <input type="password" name="wifi_password" id="ap_wifi_pw" placeholder="Enter password" required>
 <label style="font-size:.85em;color:#8b949e;margin:8px 0"><input type="checkbox" onclick="var p=document.getElementById('ap_wifi_pw');p.type=this.checked?'text':'password'"> Show password</label>
@@ -422,8 +430,14 @@ HTMLEOF
     cat << HTMLEOF
 
 <div class="card">
+<h2>Network</h2>
+<div class="svc"><span>RTSP Stream</span><span style="color:#889"><code>rtsp://${CUR_IP}/live</code></span></div>
+<div class="svc"><span>Web UI</span><span style="color:#889"><code>http://${CUR_IP}/</code></span></div>
+</div>
+
+<div class="card">
 <h2>Firmware</h2>
-<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.1.0</span></div>
+<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.1.1</span></div>
 <div class="svc"><span>Kernel</span><span style="color:#889">${KERNEL}</span></div>
 <div class="svc"><span>System Time</span><span style="color:#889">$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)</span></div>
 </div>
@@ -457,6 +471,8 @@ HTMLEOF
     CLOUD_CHK="" ; [ "$CLOUD_ENABLED" = "1" ] && CLOUD_CHK="checked"
     OTA_ENABLED=$(get_setting ota_updates_enabled "1")
     OTA_CHK="" ; [ "$OTA_ENABLED" = "1" ] && OTA_CHK="checked"
+    PRUSA_TOKEN=$(html_escape "$(get_setting prusa_token '')")
+    SCHED_REBOOT=$(html_escape "$(get_setting scheduled_reboot '')")
 
     AUD_DEF="" AUD_MUTE="" AUD_DING=""
     case "$AUDIO_MODE" in 0) AUD_MUTE="selected";; 1) AUD_DEF="selected";; 2) AUD_DING="selected";; *) AUD_DEF="selected";; esac
@@ -533,8 +549,20 @@ application_exit.wav</code>
 <label class="toggle"><input type="checkbox" name="ota_updates_enabled" value="1" ${OTA_CHK}><span class="sl"></span></label>
 </div>
 <div class="setting">
+<label>PrusaConnect Token<span class="hint">From PrusaConnect app &gt; Camera &gt; Token</span></label>
+<input type="text" name="prusa_token" value="${PRUSA_TOKEN}" placeholder="Paste token here">
+</div>
+<div class="setting">
 <label>Upload Interval<span class="hint">ms between snapshots (if cloud on)</span></label>
 <input type="text" name="snapshot_upload_interval" value="${UPLOAD_INTERVAL}">
+</div>
+</div>
+
+<div class="card">
+<h2>Maintenance</h2>
+<div class="setting">
+<label>Scheduled Daily Reboot<span class="hint">Time in HH:MM (24h), leave blank to disable</span></label>
+<input type="text" name="scheduled_reboot" value="${SCHED_REBOOT}" placeholder="04:00">
 </div>
 </div>
 
@@ -554,6 +582,10 @@ HTMLEOF
     update_setting video_quality "$(get_field video_quality)"
     update_setting volume "$(get_field volume)"
     update_setting snapshot_upload_interval "$(get_field snapshot_upload_interval)"
+    PT=$(urldecode "$(get_field prusa_token)")
+    update_setting prusa_token "$PT"
+    SR=$(urldecode "$(get_field scheduled_reboot)")
+    update_setting scheduled_reboot "$SR"
     update_setting audio_announcements "$(get_field audio_announcements)"
 
     # Checkboxes: present in BODY if checked, absent if unchecked
@@ -935,10 +967,25 @@ HTMLEOF
 </div>
 </div>
 
+<div class="card">
+<h2>Available Networks</h2>
+<div class="log-list" style="max-height:200px;overflow-y:auto">
+HTMLEOF
+    iwlist wlan0 scan 2>/dev/null | awk '
+        /ESSID:/ { gsub(/.*ESSID:"/, ""); gsub(/".*/, ""); essid=$0 }
+        /Quality=/ { split($0, a, "="); split(a[2], q, "/"); qual=int(q[1]); printf "%d\t%s\n", qual, essid }
+    ' | sort -rn | awk -F'\t' '!seen[$2]++ { printf "<div class=\"svc\" style=\"cursor:pointer\" onclick=\"document.getElementById(\\\"wifi_ssid\\\").value=this.dataset.ssid\" data-ssid=\"%s\"><span>%s</span><span style=\"color:#889\">%d%%</span></div>\n", $2, $2, $1 }'
+    SCAN_COUNT=$(iwlist wlan0 scan 2>/dev/null | grep -c "ESSID:")
+    [ "$SCAN_COUNT" -eq 0 ] && echo '<div style="font-size:.85em;color:#556;padding:8px 0">No networks found. Try again in a moment.</div>'
+    cat << HTMLEOF
+</div>
+<div class="note" style="margin-top:6px">Tap a network name to fill it in below.</div>
+</div>
+
 <form method="POST" action="/save/wifi">
 <div class="card">
 <h2>WiFi Connection</h2>
-<div class="setting"><label>SSID<span class="hint">Network name to connect to</span></label><input type="text" name="wifi_ssid" value="${SSID}" placeholder="MyNetwork"></div>
+<div class="setting"><label>SSID<span class="hint">Network name to connect to</span></label><input type="text" name="wifi_ssid" id="wifi_ssid" value="${SSID}" placeholder="MyNetwork"></div>
 <div class="setting"><label>Password<span class="hint">Leave blank to keep current password</span></label><input type="password" name="wifi_password" id="wifi_pw" placeholder="Enter WiFi password"></div>
 <div class="setting"><label></label><label style="font-size:.85em;color:#889"><input type="checkbox" onclick="var p=document.getElementById('wifi_pw');p.type=this.checked?'text':'password'"> Show password</label></div>
 <button type="submit" class="btn btn-outline" onclick="return confirm('Change WiFi network? The camera will disconnect and attempt to connect to the new network. If the new credentials are wrong, the camera will start an AP named Buddy3D-Setup.')">Save WiFi Settings</button>
