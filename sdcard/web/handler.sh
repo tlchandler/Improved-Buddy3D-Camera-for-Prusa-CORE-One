@@ -69,6 +69,7 @@ update_setting() {
     else
         echo "$1=$2" >> "$SETTINGS"
     fi
+    touch /tmp/buddy_settings_changed
 }
 
 # ============================================================
@@ -97,6 +98,56 @@ case "$REQUEST_PATH" in
     /snapshot.jpg) ;;
     *) check_auth ;;
 esac
+
+# ============================================================
+# AP MODE — serve WiFi setup page only
+# ============================================================
+
+if [ -f /tmp/buddy_ap_mode ] && [ "$REQUEST_PATH" != "/save/wifi" ]; then
+    printf "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+    SAVED_MSG=""
+    case "$QUERY_STRING" in *saved=1) SAVED_MSG='<div style="background:#1a3a1a;border:1px solid #2d5a2d;padding:12px;border-radius:8px;margin-bottom:16px;color:#6fbf73;text-align:center">WiFi credentials saved. Power cycle the camera to connect.</div>' ;; esac
+    cat << 'APPAGE'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buddy3D WiFi Setup</title>
+<style>
+body { background:#0e1117; color:#c9d1d9; font-family:-apple-system,system-ui,sans-serif; margin:0; padding:20px; }
+.card { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:24px; max-width:420px; margin:40px auto; }
+h1 { color:#fa6831; font-size:1.4em; margin:0 0 8px 0; text-align:center; }
+p { font-size:.9em; color:#8b949e; text-align:center; margin:0 0 20px 0; }
+label { display:block; color:#c9d1d9; font-size:.9em; margin-bottom:4px; }
+input[type=text], input[type=password] { width:100%; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:1em; margin-bottom:16px; box-sizing:border-box; }
+button { width:100%; padding:12px; background:#fa6831; color:#fff; border:none; border-radius:8px; font-size:1em; cursor:pointer; }
+button:hover { background:#fb8f67; }
+.hint { display:block; font-size:.8em; color:#8b949e; margin-top:20px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Buddy3D WiFi Setup</h1>
+<p>The camera is not connected to WiFi.<br>Enter your network credentials below.</p>
+APPAGE
+    echo "$SAVED_MSG"
+    cat << 'APPAGE2'
+<form method="POST" action="/save/wifi">
+<label>WiFi Network Name (SSID)</label>
+<input type="text" name="wifi_ssid" placeholder="MyNetwork" required>
+<label>WiFi Password</label>
+<input type="password" name="wifi_password" id="ap_wifi_pw" placeholder="Enter password" required>
+<label style="font-size:.85em;color:#8b949e;margin:8px 0"><input type="checkbox" onclick="var p=document.getElementById('ap_wifi_pw');p.type=this.checked?'text':'password'"> Show password</label>
+<button type="submit">Save &amp; Reboot</button>
+</form>
+<span class="hint">After saving, power cycle the camera to connect to your network.</span>
+</div>
+</body>
+</html>
+APPAGE2
+    exit 0
+fi
 
 # ============================================================
 # HTML TEMPLATE
@@ -205,10 +256,10 @@ CSSEOF
     echo '</nav>'
     echo '<div class="wrap">'
 
-    # Show saved banner if redirected after save
-    case "$QUERY_STRING" in
-        *saved=1*) echo '<div class="banner">Settings saved. Most changes require a reboot to take effect.</div>' ;;
-    esac
+    # Show persistent banner if settings were changed since last boot
+    if [ -f /tmp/buddy_settings_changed ]; then
+        echo '<div class="banner">Settings have been changed. To apply, remove power from the camera and reconnect it.</div>'
+    fi
 }
 
 html_footer() {
@@ -247,7 +298,8 @@ case "$REQUEST_PATH" in
     CUR_MASK=$(ifconfig wlan0 2>/dev/null | grep 'Mask' | sed 's/.*Mask:\([^ ]*\).*/\1/')
     CUR_GW=$(route -n 2>/dev/null | grep '^0.0.0.0' | awk '{print $2}')
     CUR_MAC=$(ifconfig wlan0 2>/dev/null | grep 'HWaddr' | awk '{print $5}')
-    SSID=$(grep 'ssid=' /tmp/config/wpa_supplicant.conf 2>/dev/null | grep -v 'scan_ssid' | head -1 | sed 's/.*ssid="\(.*\)"/\1/' | sed "s/.*ssid='\(.*\)'/\1/" | sed 's/^[[:space:]]*//')
+    SSID=$(get_setting wifi_ssid "")
+    [ -z "$SSID" ] && SSID=$(grep 'ssid=' /tmp/config/wpa_supplicant.conf 2>/dev/null | grep -v 'scan_ssid' | head -1 | sed 's/.*ssid="\(.*\)"/\1/' | sed "s/.*ssid='\(.*\)'/\1/" | sed 's/^[[:space:]]*//')
     SSID=$(html_escape "$SSID")
 
     SIGNAL_RAW=$(cat /proc/net/wireless 2>/dev/null | tail -1 | awk '{print $4}' | tr -d '.')
@@ -390,9 +442,6 @@ HTMLEOF
     AUDIO_MODE=$(get_setting audio_announcements "1")
 
     CLOUD_ENABLED=$(get_setting cloud_enabled "0")
-    if grep -q "connect.prusa3d.com" "$HOSTS" 2>/dev/null; then
-        CLOUD_ENABLED=0
-    fi
 
     IR_AUTO="" IR_DAY="" IR_NIGHT=""
     case "$IR_MODE" in 0) IR_DAY="selected";; 1) IR_AUTO="selected";; 2) IR_NIGHT="selected";; *) IR_AUTO="selected";; esac
@@ -479,15 +528,6 @@ application_exit.wav</code>
 <button type="submit" class="btn">Save Settings</button>
 </form>
 
-<div class="card" style="margin-top:20px">
-<h2>Maintenance</h2>
-<form method="POST" action="/reboot" onsubmit="return confirm('Reboot the camera?')">
-<button type="submit" class="btn btn-blue">Reboot Camera</button>
-</form>
-<form method="POST" action="/reset" onsubmit="return confirm('Reset all settings to factory defaults? This will delete buddy_settings.ini.')">
-<button type="submit" class="btn btn-danger">Factory Reset</button>
-</form>
-</div>
 HTMLEOF
     html_footer
     ;;
@@ -834,7 +874,8 @@ HTMLEOF
     fi
     SIGNAL_BARS=$((SIGNAL_PCT / 20))
 
-    SSID=$(grep 'ssid=' /tmp/config/wpa_supplicant.conf 2>/dev/null | grep -v 'scan_ssid' | head -1 | sed 's/.*ssid="\(.*\)"/\1/' | sed "s/.*ssid='\(.*\)'/\1/" | sed 's/^[[:space:]]*//')
+    SSID=$(get_setting wifi_ssid "")
+    [ -z "$SSID" ] && SSID=$(grep 'ssid=' /tmp/config/wpa_supplicant.conf 2>/dev/null | grep -v 'scan_ssid' | head -1 | sed 's/.*ssid="\(.*\)"/\1/' | sed "s/.*ssid='\(.*\)'/\1/" | sed 's/^[[:space:]]*//')
     SSID=$(html_escape "$SSID")
 
     DHCP_CHK="" STATIC_CHK=""
@@ -877,7 +918,8 @@ HTMLEOF
 <div class="card">
 <h2>WiFi Connection</h2>
 <div class="setting"><label>SSID<span class="hint">Network name to connect to</span></label><input type="text" name="wifi_ssid" value="${SSID}" placeholder="MyNetwork"></div>
-<div class="setting"><label>Password<span class="hint">Leave blank to keep current password</span></label><input type="password" name="wifi_password" placeholder="Enter WiFi password"></div>
+<div class="setting"><label>Password<span class="hint">Leave blank to keep current password</span></label><input type="password" name="wifi_password" id="wifi_pw" placeholder="Enter WiFi password"></div>
+<div class="setting"><label></label><label style="font-size:.85em;color:#889"><input type="checkbox" onclick="var p=document.getElementById('wifi_pw');p.type=this.checked?'text':'password'"> Show password</label></div>
 <button type="submit" class="btn btn-outline" onclick="return confirm('Change WiFi network? The camera will disconnect and attempt to connect to the new network. If the new credentials are wrong, the camera will start an AP named Buddy3D-Setup.')">Save WiFi Settings</button>
 </div>
 </form>
@@ -934,8 +976,9 @@ HTMLEOF
     W_SSID=$(urldecode "$(get_field wifi_ssid)")
     W_PASS=$(urldecode "$(get_field wifi_password)")
     if [ -n "$W_SSID" ]; then
-        # Save to buddy_settings for reference
+        # Save to buddy_settings (persists across reboots)
         update_setting wifi_ssid "$W_SSID"
+        [ -n "$W_PASS" ] && update_setting wifi_password "$W_PASS"
         # Update the live wpa_supplicant config
         WPA_CONF="/tmp/config/wpa_supplicant.conf"
         if [ -n "$W_PASS" ]; then

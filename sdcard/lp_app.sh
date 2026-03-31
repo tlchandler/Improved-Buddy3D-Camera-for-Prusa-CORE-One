@@ -113,9 +113,44 @@ while IFS='=' read -r key val; do
         ip_mode|static_ip|static_mask|static_gateway|static_dns) ;; # handled separately below
         ntp_server) ;; # handled separately below
         audio_announcements) ;; # handled separately below
+        wifi_ssid|wifi_password) ;; # handled separately below
         *) apply_setting "$key" "$val" ;;
     esac
 done < "$SETTINGS"
+
+# ============================================================
+# WIFI CREDENTIALS (apply saved SSID/password to wpa_supplicant)
+# ============================================================
+
+WIFI_SSID=$(get_setting wifi_ssid "")
+WIFI_PASS=$(get_setting wifi_password "")
+if [ -n "$WIFI_SSID" ] && [ -n "$WIFI_PASS" ]; then
+    log "Applying saved WiFi credentials for SSID: $WIFI_SSID"
+    WPA_CONF="/tmp/config/wpa_supplicant.conf"
+    mkdir -p /tmp/config
+    cat > "$WPA_CONF" << WPAEOF
+ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+
+network={
+	scan_ssid=1
+	ssid="${WIFI_SSID}"
+	psk="${WIFI_PASS}"
+	key_mgmt=WPA-PSK
+}
+WPAEOF
+    # Also update xhr_config.ini so lp_app uses the right credentials
+    if [ -f "$CONFIG" ]; then
+        sed -i "s|^ssid=.*|ssid=${WIFI_SSID}|" "$CONFIG"
+        ENC_PASS=$(echo -n "$WIFI_PASS" | uuencode -m - 2>/dev/null | sed -n '2p')
+        [ -n "$ENC_PASS" ] && sed -i "s|^pwd=.*|pwd=${ENC_PASS}|" "$CONFIG"
+    fi
+    # Restart wpa_supplicant with new config
+    killall wpa_supplicant 2>/dev/null
+    sleep 1
+    wpa_supplicant -Dnl80211 -iwlan0 -c"$WPA_CONF" -B 2>/dev/null
+    udhcpc -i wlan0 -b -q 2>/dev/null &
+fi
 
 # ============================================================
 # CLOUD BLOCKING
@@ -355,19 +390,53 @@ if [ "$IP_MODE" = "static" ]; then
 fi
 
 # ============================================================
-# WIFI AP FALLBACK MODE
+# WIFI AP FALLBACK — wait for connection before starting lp_app
 # ============================================================
 
-log "WiFi AP fallback: will check in 40 seconds"
-(
-    sleep 40
+log "Waiting up to 30s for WiFi connection"
+_wifi_wait=0
+while [ $_wifi_wait -lt 30 ]; do
     WLAN_IP=$(ifconfig wlan0 2>/dev/null | grep 'inet addr' | sed 's/.*addr:\([^ ]*\).*/\1/')
-    if [ -z "$WLAN_IP" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [boot] No WiFi connection after 40s — starting AP mode" >> "$LOGFILE"
-        killall wpa_supplicant 2>/dev/null
-        sleep 2
-        ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up
-        cat > /tmp/udhcpd_ap.conf << 'APEOF'
+    [ -n "$WLAN_IP" ] && break
+    sleep 2
+    _wifi_wait=$((_wifi_wait + 2))
+done
+
+if [ -n "$WLAN_IP" ]; then
+    log "WiFi connected: ${WLAN_IP}"
+else
+    log "No WiFi after 30s — entering AP-only mode (lp_app will not start)"
+    touch /tmp/buddy_ap_mode
+    [ -f "$SD/sounds/wifi_ap_mode.wav" ] && simple_ao -i "$SD/sounds/wifi_ap_mode.wav" -v 50 2>/dev/null
+
+    # Build unique SSID using last 4 hex chars of CPU serial
+    AP_SUFFIX=$(grep -i '^Serial' /proc/cpuinfo 2>/dev/null | sed 's/.*: *//' | tail -c 5 | tr 'a-f' 'A-F')
+    [ -z "$AP_SUFFIX" ] && AP_SUFFIX="0000"
+    AP_SSID="Buddy3D-${AP_SUFFIX}"
+
+    killall wpa_supplicant 2>/dev/null
+    killall udhcpc 2>/dev/null
+    sleep 1
+
+    # Start hostapd first (takes control of wlan0)
+    cat > /tmp/hostapd.conf << HAPEOF
+interface=wlan0
+driver=nl80211
+ssid=${AP_SSID}
+channel=6
+hw_mode=g
+auth_algs=1
+wpa=0
+HAPEOF
+    hostapd -B /tmp/hostapd.conf
+    sleep 1
+
+    # Set IP after hostapd is running (hostapd resets the interface)
+    ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up
+    sleep 2
+
+    # Start DHCP server
+    cat > /tmp/udhcpd_ap.conf << 'APEOF'
 start 192.168.4.100
 end 192.168.4.200
 interface wlan0
@@ -376,35 +445,16 @@ option router 192.168.4.1
 option dns 192.168.4.1
 option lease 3600
 APEOF
-        udhcpd /tmp/udhcpd_ap.conf &
-        cat > /tmp/hostapd.conf << 'APEOF'
-interface=wlan0
-driver=nl80211
-ssid=Buddy3D-Setup
-channel=6
-hw_mode=g
-auth_algs=1
-wpa=0
-APEOF
-        if which hostapd >/dev/null 2>&1; then
-            hostapd /tmp/hostapd.conf &
-            echo "$(date '+%Y-%m-%d %H:%M:%S') [boot] AP mode started via hostapd (SSID: Buddy3D-Setup)" >> "$LOGFILE"
-        else
-            cat > /tmp/wpa_ap.conf << 'APEOF2'
-network={
-    ssid="Buddy3D-Setup"
-    mode=2
-    key_mgmt=NONE
-    frequency=2437
-}
-APEOF2
-            wpa_supplicant -Dnl80211 -iwlan0 -c/tmp/wpa_ap.conf -B 2>/dev/null
-            echo "$(date '+%Y-%m-%d %H:%M:%S') [boot] AP mode started via wpa_supplicant (SSID: Buddy3D-Setup)" >> "$LOGFILE"
-        fi
-    else
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [boot] WiFi connected: ${WLAN_IP} — AP fallback not needed" >> "$LOGFILE"
-    fi
-) &
+    mkdir -p /var/lib/misc
+    touch /var/lib/misc/udhcpd.leases
+    udhcpd /tmp/udhcpd_ap.conf &
+
+    log "AP mode started (SSID: ${AP_SSID}) — connect to configure WiFi at http://192.168.4.1/"
+
+    # Stay alive — web server is already running, just wait here
+    # When the user configures WiFi and reboots, lp_app will start normally
+    while true; do sleep 3600; done
+fi
 
 # ============================================================
 # START CAMERA APP

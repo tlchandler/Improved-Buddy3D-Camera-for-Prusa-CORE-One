@@ -71,12 +71,12 @@ If the camera cannot connect to WiFi within 40 seconds of booting, it automatica
 
 | Setting | Value |
 |---------|-------|
-| SSID | `Buddy3D-Setup` |
+| SSID | `Buddy3D-XXXX` (last 4 hex digits of CPU serial, unique per camera) |
 | Password | None (open network) |
 | Camera IP | `192.168.4.1` |
 | DHCP range | `192.168.4.100` - `192.168.4.200` |
 
-Connect to the `Buddy3D-Setup` network from your phone or laptop, then open `http://192.168.4.1/` to access the web UI and configure your WiFi credentials. Once saved, reboot the camera and it will connect to your network normally.
+Connect to the `Buddy3D-XXXX` network from your phone or laptop, then open `http://192.168.4.1/` to access the web UI and configure your WiFi credentials. Once saved, reboot the camera and it will connect to your network normally.
 
 ## Removing the SD Card
 
