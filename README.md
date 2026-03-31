@@ -1,5 +1,7 @@
 # Buddy3D Camera Custom Firmware Overlay
 
+**Version 0.1.0**
+
 A set of SD card files that replace the cloud-dependent behavior of the **Prusa Buddy3D Camera** (Core One) with a fully local, self-hosted system. The camera hardware is untouched -- all modifications live on a removable microSD card. Remove the card and reboot to restore factory behavior.
 
 > **Disclaimer:** This project is provided as-is, with no warranty of any kind. Modifying your camera's behavior carries risk, including the possibility of rendering it temporarily or permanently non-functional. By using these files, you accept full responsibility for any consequences. The authors disclaim all liability for damage to hardware, lost data, or voided warranties.

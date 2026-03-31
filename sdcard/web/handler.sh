@@ -258,7 +258,7 @@ CSSEOF
 
     # Show persistent banner if settings were changed since last boot
     if [ -f /tmp/buddy_settings_changed ]; then
-        echo '<div class="banner">Settings have been changed. To apply, remove power from the camera and reconnect it.</div>'
+        echo '<div class="banner">Settings have been changed. To apply, power cycle the camera or <form method="POST" action="/reboot" style="display:inline" onsubmit="return confirm('\''Restart the camera now?'\'')"><button type="submit" style="background:none;border:1px solid #fa6831;color:#fa6831;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:.9em">Restart Now</button></form></div>'
     fi
 }
 
@@ -423,8 +423,15 @@ HTMLEOF
 
 <div class="card">
 <h2>Firmware</h2>
+<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.1.0</span></div>
 <div class="svc"><span>Kernel</span><span style="color:#889">${KERNEL}</span></div>
 <div class="svc"><span>System Time</span><span style="color:#889">$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)</span></div>
+</div>
+
+<div class="card">
+<form method="POST" action="/reboot" onsubmit="return confirm('Restart the camera now?')">
+<button type="submit" class="btn btn-outline" style="width:100%">Restart Camera</button>
+</form>
 </div>
 HTMLEOF
 
@@ -448,6 +455,8 @@ HTMLEOF
 
     RTSP_CHK="" ; [ "$RTSP_MODE" = "2" ] && RTSP_CHK="checked"
     CLOUD_CHK="" ; [ "$CLOUD_ENABLED" = "1" ] && CLOUD_CHK="checked"
+    OTA_ENABLED=$(get_setting ota_updates_enabled "1")
+    OTA_CHK="" ; [ "$OTA_ENABLED" = "1" ] && OTA_CHK="checked"
 
     AUD_DEF="" AUD_MUTE="" AUD_DING=""
     case "$AUDIO_MODE" in 0) AUD_MUTE="selected";; 1) AUD_DEF="selected";; 2) AUD_DING="selected";; *) AUD_DEF="selected";; esac
@@ -520,6 +529,10 @@ application_exit.wav</code>
 <label class="toggle"><input type="checkbox" name="cloud_enabled" value="1" ${CLOUD_CHK}><span class="sl"></span></label>
 </div>
 <div class="setting">
+<label>Firmware Updates<span class="hint">Allow Prusa OTA firmware updates</span></label>
+<label class="toggle"><input type="checkbox" name="ota_updates_enabled" value="1" ${OTA_CHK}><span class="sl"></span></label>
+</div>
+<div class="setting">
 <label>Upload Interval<span class="hint">ms between snapshots (if cloud on)</span></label>
 <input type="text" name="snapshot_upload_interval" value="${UPLOAD_INTERVAL}">
 </div>
@@ -552,13 +565,23 @@ HTMLEOF
     [ -z "$CE" ] && CE=0
     update_setting cloud_enabled "$CE"
 
-    # Apply cloud hosts
-    CLOUD_HOSTS="connect.prusa3d.com camera-signaling.prusa3d.com connect-ota.prusa3d.com timezone.prusa3d.com prusa3d.pool.ntp.org"
+    OE=$(get_field ota_updates_enabled)
+    [ -z "$OE" ] && OE=0
+    update_setting ota_updates_enabled "$OE"
+
+    # Apply cloud and OTA hosts
+    CLOUD_HOSTS="connect.prusa3d.com camera-signaling.prusa3d.com timezone.prusa3d.com prusa3d.pool.ntp.org"
+    OTA_HOST="connect-ota.prusa3d.com"
     mount -o remount,rw / 2>/dev/null
     if [ "$CE" = "1" ]; then
         for h in $CLOUD_HOSTS; do grep -vF "$h" "$HOSTS" > "$HOSTS.tmp" && mv "$HOSTS.tmp" "$HOSTS"; done
     else
         for h in $CLOUD_HOSTS; do grep -qF "$h" "$HOSTS" || echo "127.0.0.1 $h" >> "$HOSTS"; done
+    fi
+    if [ "$OE" = "1" ]; then
+        grep -vF "$OTA_HOST" "$HOSTS" > "$HOSTS.tmp" && mv "$HOSTS.tmp" "$HOSTS"
+    else
+        grep -qF "$OTA_HOST" "$HOSTS" || echo "127.0.0.1 $OTA_HOST" >> "$HOSTS"
     fi
     mount -o remount,ro / 2>/dev/null
 
@@ -654,7 +677,7 @@ setInterval(function(){
 </div>
 
 <div class="card">
-<h2>Timelapse</h2>
+<h2>Always-On Timelapse</h2>
 <form method="POST" action="/save/timelapse">
 <div class="setting">
 <label>Enable Timelapse<span class="hint">Auto-capture to SD card at regular intervals</span></label>
@@ -682,8 +705,10 @@ HTMLEOF
 <div style="margin-top:8px;font-size:.8em;color:#667">${TL_COUNT} timelapse images captured</div>
 </div>
 
+<form method="POST" action="/save/print">
 <div class="card">
-<h2>Print Timelapse — Status</h2>
+<h2>Print Timelapse</h2>
+
 <div class="stat-grid">
 <div class="stat"><div class="label">State</div><div class="value ${PT_STATE_CLASS}">${PT_STATE}</div></div>
 <div class="stat"><div class="label">Listener</div><div class="value$([ "$PT_RUNNING" = "yes" ] && echo ' good' || echo ' bad')">$([ "$PT_RUNNING" = "yes" ] && echo 'Running' || echo 'Stopped')</div></div>
@@ -700,11 +725,7 @@ HTMLEOF
 
     cat << HTMLEOF
 </div>
-</div>
-
-<form method="POST" action="/save/print">
-<div class="card">
-<h2>Print Timelapse — Settings</h2>
+<hr class="sep">
 <div class="setting">
 <label>Enable Print Timelapse<span class="hint">Listen for printer metrics on UDP</span></label>
 <label class="toggle"><input type="checkbox" name="pt_enabled" value="1" ${PT_CHK}><span class="sl"></span></label>
@@ -754,7 +775,7 @@ HTMLEOF
     # Setup instructions
     cat << HTMLEOF
 <details style="margin-top:12px">
-<summary style="color:#fa6831;font-size:.9em;cursor:pointer;padding:8px 0;font-weight:500">Printer Setup Guide</summary>
+<summary style="color:#fa6831;font-size:.9em;cursor:pointer;padding:8px 0;font-weight:500">Print Timelapse Printer Setup Guide</summary>
 <div class="card" style="margin-top:8px">
 <h2>PrusaSlicer Configuration</h2>
 <p style="font-size:.85em;color:#aab;line-height:1.6;margin-bottom:12px">
@@ -1295,7 +1316,7 @@ HTMLEOF
 EOF
     sync
     sleep 1
-    reboot &
+    reboot -f &
     ;;
 
 # ---- FACTORY RESET ----

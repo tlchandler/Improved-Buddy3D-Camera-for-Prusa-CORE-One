@@ -107,6 +107,7 @@ while IFS='=' read -r key val; do
     case "$key" in
         \#*|"["*) continue ;;
         cloud_enabled) CLOUD_ENABLED="$val" ;;
+        ota_updates_enabled) ;; # handled separately below
         timelapse_enabled|timelapse_interval) ;; # handled separately below
         telnet_enabled|web_username|web_password) ;; # handled separately below
         pt_*) ;; # print timelapse settings, handled by the binary
@@ -156,17 +157,26 @@ fi
 # CLOUD BLOCKING
 # ============================================================
 
-CLOUD_HOSTS="connect.prusa3d.com camera-signaling.prusa3d.com connect-ota.prusa3d.com timezone.prusa3d.com prusa3d.pool.ntp.org"
+CLOUD_HOSTS="connect.prusa3d.com camera-signaling.prusa3d.com timezone.prusa3d.com prusa3d.pool.ntp.org"
+OTA_HOST="connect-ota.prusa3d.com"
+OTA_ENABLED=$(get_setting ota_updates_enabled "1")
+mount -o remount,rw / 2>/dev/null
 if [ "$CLOUD_ENABLED" != "1" ]; then
     log "Cloud disabled — blocking Prusa endpoints in /etc/hosts"
-    mount -o remount,rw / 2>/dev/null
     for h in $CLOUD_HOSTS; do
         grep -qF "$h" "$HOSTS" || echo "127.0.0.1 $h" >> "$HOSTS"
     done
-    mount -o remount,ro / 2>/dev/null
 else
     log "Cloud enabled"
 fi
+if [ "$OTA_ENABLED" != "1" ]; then
+    log "OTA firmware updates disabled"
+    grep -qF "$OTA_HOST" "$HOSTS" || echo "127.0.0.1 $OTA_HOST" >> "$HOSTS"
+else
+    log "OTA firmware updates enabled"
+    grep -vF "$OTA_HOST" "$HOSTS" > "$HOSTS.tmp" && mv "$HOSTS.tmp" "$HOSTS"
+fi
+mount -o remount,ro / 2>/dev/null
 
 # ============================================================
 # NTP CONFIGURATION
