@@ -11,6 +11,8 @@ A set of SD card files that replace the cloud-dependent behavior of the **Prusa 
 - **Local web UI** -- configure camera settings, view live snapshots, manage media, all from your browser
 - **RTSP streaming** -- view the live feed in VLC, Home Assistant, or any RTSP client at `rtsp://<camera-ip>/live`
 - **Cloud blocking** -- optionally block all Prusa cloud endpoints so the camera operates fully offline
+- **OTA firmware updates** -- independent toggle to allow or block Prusa firmware updates
+- **WiFi AP fallback** -- automatic access point if WiFi isn't configured, with a dedicated setup page
 - **Print timelapse** -- automatically capture snapshots during prints by listening for printer metrics over UDP
 - **Regular timelapse** -- scheduled interval captures independent of printing
 - **Snapshot capture** -- on-demand JPEG snapshots via the web UI
@@ -69,7 +71,7 @@ Open `http://<camera-ip>/` in your browser. The camera gets its IP from DHCP -- 
 
 ### WiFi AP Fallback
 
-If the camera cannot connect to WiFi within 40 seconds of booting, it automatically creates its own wireless access point:
+If the camera cannot connect to WiFi within 30 seconds of booting, it automatically creates its own wireless access point:
 
 | Setting | Value |
 |---------|-------|
@@ -97,7 +99,7 @@ This works because `lp_app.sh` restores factory configuration files every boot b
 |------|-------------|
 | **Status** | System dashboard -- uptime, temperature, memory, disk usage, network, services, active print |
 | **Media** | Browse and download snapshots, timelapse frames, and print timelapse sessions |
-| **Settings** | Camera name, volume, audio mode, IR/night mode, video quality, RTSP, cloud toggle |
+| **Settings** | Camera name, volume, audio mode, IR/night mode, video quality, RTSP, cloud, OTA updates |
 | **Capture** | Live JPEG preview, take snapshots, configure timelapse intervals, print timelapse settings |
 | **Network** | WiFi signal, SSID, IP info, DHCP/static toggle, NTP server |
 | **Security** | Web UI password, telnet toggle |
@@ -263,15 +265,19 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 
 ### snapshot_grabber
 
-Dynamically linked against the Rockchip MPI library (`librockit.so`). Requires the `rkmpi_example` headers and libraries from the [Luckfox Pico SDK](https://github.com/LuckfoxTECH/luckfox-pico).
+Dynamically linked against `librockit.so` (Rockchip MPI). **Requires the Luckfox Pico uclibc toolchain** -- the generic `arm-linux-gnueabihf-gcc` produces glibc binaries that will not run on the camera.
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "C:/path/to/src:/build/src" \
   -v "C:/path/to/rkmpi_example:/build/rkmpi" \
+  -v "C:/path/to/uclibc_toolchain:/build/toolchain" \
+  -e "PATH=/build/toolchain/bin:/usr/local/bin:/usr/bin:/bin" \
   -w /build/src \
   gcc:12 bash build_snapshot_grabber.sh
 ```
+
+**Windows note:** Extracting the Luckfox toolchain on Windows breaks Linux symlinks. See the header of `src/build_snapshot_grabber.sh` for a one-time Docker fix command.
 
 ## How It Works (Technical)
 
@@ -282,10 +288,13 @@ The camera's init system (`/oem/usr/bin/RkLunch.sh`) checks for `/mnt/sdcard/lp_
 1. **Backs up** factory config (first boot only)
 2. **Restores** factory config (clean slate)
 3. **Applies** custom settings from `buddy_settings.ini`
-4. **Blocks** cloud endpoints in `/etc/hosts` (if cloud disabled)
-5. **Syncs** system clock via NTP
-6. **Starts** background services (web server, snapshot capture, timelapse, print listener)
-7. **Launches** the stock `lp_app` camera binary (which handles RTSP, video encoding, WiFi)
+4. **Applies** saved WiFi credentials (if configured via web UI)
+5. **Blocks** cloud endpoints in `/etc/hosts` (if cloud disabled)
+6. **Blocks** OTA endpoint (if firmware updates disabled)
+7. **Syncs** system clock via NTP
+8. **Starts** background services (web server, snapshot capture, timelapse, print listener)
+9. **Waits** up to 30s for WiFi -- if no connection, enters AP-only mode (does not start lp_app)
+10. **Launches** the stock `lp_app` camera binary (which handles RTSP, video encoding, WiFi)
 
 The web UI is a shell-script HTTP server -- `server.sh` configures BusyBox `inetd` to listen on port 80 and spawn `handler.sh` per connection. No external web server or runtime is needed.
 
@@ -301,4 +310,4 @@ The web UI is a shell-script HTTP server -- `server.sh` configures BusyBox `inet
 
 This project is not affiliated with or endorsed by Prusa Research. "Prusa" and "Core One" are trademarks of Prusa Research a.s.
 
-This project is released under the [MIT License](LICENSE).
+This project is released under the MIT License.
