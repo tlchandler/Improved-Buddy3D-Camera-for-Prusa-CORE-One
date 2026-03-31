@@ -55,9 +55,10 @@ if [ ! -f "$FACTORY_CONFIG" ]; then
     log "First run — backing up factory config"
     cp "$CONFIG" "$FACTORY_CONFIG" && cp "$CONFIG" "$SD/xhr_config.ini.factory"
 fi
-if [ ! -f "$FACTORY_HOSTS" ]; then
-    log "First run — backing up factory hosts"
-    cp "$HOSTS" "$FACTORY_HOSTS"
+if [ ! -f "$FACTORY_HOSTS" ] || grep -q "connect.prusa3d.com" "$FACTORY_HOSTS" 2>/dev/null; then
+    log "Backing up clean factory hosts"
+    # Generate a clean hosts file (the backup may have been taken after we blocked hosts)
+    printf "127.0.0.1\tlocalhost\n127.0.1.1\tRockchip\n" > "$FACTORY_HOSTS"
 fi
 
 # ============================================================
@@ -115,6 +116,7 @@ while IFS='=' read -r key val; do
         ntp_server) ;; # handled separately below
         audio_announcements) ;; # handled separately below
         wifi_ssid|wifi_password) ;; # handled separately below
+        prusa_token|scheduled_reboot) ;; # handled separately below
         *) apply_setting "$key" "$val" ;;
     esac
 done < "$SETTINGS"
@@ -152,6 +154,23 @@ WPAEOF
     wpa_supplicant -Dnl80211 -iwlan0 -c"$WPA_CONF" -B 2>/dev/null
     udhcpc -i wlan0 -b -q 2>/dev/null &
 fi
+
+# ============================================================
+# PRUSACONNECT TOKEN
+# ============================================================
+
+PRUSA_TOKEN=$(get_setting prusa_token "")
+if [ -n "$PRUSA_TOKEN" ]; then
+    log "Applying PrusaConnect token"
+    echo -n "$PRUSA_TOKEN" > /userdata/xhr_http_token.conf
+    sed -i "s|^token=.*|token=${PRUSA_TOKEN}|" "$CONFIG"
+fi
+
+# ============================================================
+# CORE DUMP CLEANUP
+# ============================================================
+
+rm -f /userdata/core* 2>/dev/null
 
 # ============================================================
 # CLOUD BLOCKING
@@ -340,6 +359,16 @@ log "Starting timelapse background process"
 # ============================================================
 
 cleanup_storage() {
+    # Truncate large log files (max 500KB each)
+    for lf in buddy_boot.log web_access.log print_timelapse.log; do
+        LPATH="$SD/logs/$lf"
+        if [ -f "$LPATH" ]; then
+            LSIZE=$(wc -c < "$LPATH" 2>/dev/null)
+            if [ "$LSIZE" -gt 512000 ] 2>/dev/null; then
+                tail -200 "$LPATH" > "$LPATH.tmp" && mv "$LPATH.tmp" "$LPATH"
+            fi
+        fi
+    done
     SD_PCT=$(df "$SD" 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
     [ -z "$SD_PCT" ] && return
     if [ "$SD_PCT" -gt 90 ]; then
@@ -396,6 +425,27 @@ if [ "$IP_MODE" = "static" ]; then
         else
             echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Static IP mode set but no IP address configured" >> "$LOGFILE"
         fi
+    ) &
+fi
+
+# ============================================================
+# SCHEDULED DAILY REBOOT
+# ============================================================
+
+SCHED_REBOOT=$(get_setting scheduled_reboot "")
+if [ -n "$SCHED_REBOOT" ]; then
+    log "Scheduled daily reboot at ${SCHED_REBOOT}"
+    (
+        while true; do
+            sleep 60
+            CUR_TIME=$(date +%H:%M 2>/dev/null)
+            if [ "$CUR_TIME" = "$SCHED_REBOOT" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [boot] Scheduled reboot triggered" >> "$LOGFILE"
+                sync
+                sleep 2
+                reboot -f
+            fi
+        done
     ) &
 fi
 
