@@ -145,7 +145,7 @@ $CC \
     -Wall \
     -I"$HEADERS" \
     -I"$LIBJPEG_BUILD" \
-    -I"$LIBJPEG_DIR" \
+    -I"$LIBJPEG_DIR/src" \
     -o "$OUT" \
     "$SRC" \
     -L"$LIBDIR" \
