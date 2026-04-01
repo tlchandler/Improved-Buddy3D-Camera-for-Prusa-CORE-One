@@ -83,6 +83,56 @@ if [ ! -d "$HEADERS" ]; then
 fi
 
 # ============================================================
+# Build libjpeg-turbo (static, cross-compiled for ARM uclibc)
+# ============================================================
+
+LIBJPEG_VER="3.1.0"
+LIBJPEG_DIR="/build/libjpeg-turbo-${LIBJPEG_VER}"
+LIBJPEG_BUILD="/build/libjpeg-build"
+
+if [ ! -f "$LIBJPEG_BUILD/libjpeg.a" ]; then
+    echo "=== Building libjpeg-turbo ${LIBJPEG_VER} ==="
+
+    # Install cmake if not present
+    if ! command -v cmake &>/dev/null; then
+        echo "Installing cmake..."
+        apt-get update -qq && apt-get install -y -qq cmake >/dev/null 2>&1
+    fi
+
+    # Download source
+    if [ ! -d "$LIBJPEG_DIR" ]; then
+        echo "Downloading libjpeg-turbo ${LIBJPEG_VER}..."
+        cd /build
+        curl -sL "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/${LIBJPEG_VER}/libjpeg-turbo-${LIBJPEG_VER}.tar.gz" \
+            -o libjpeg-turbo.tar.gz
+        tar xzf libjpeg-turbo.tar.gz
+        rm libjpeg-turbo.tar.gz
+    fi
+
+    # Cross-compile
+    mkdir -p "$LIBJPEG_BUILD"
+    cd "$LIBJPEG_BUILD"
+    cmake "$LIBJPEG_DIR" \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+        -DCMAKE_C_COMPILER="$CC" \
+        -DCMAKE_C_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=hard" \
+        -DCMAKE_INSTALL_PREFIX=/build/libjpeg-install \
+        -DENABLE_SHARED=OFF \
+        -DENABLE_STATIC=ON \
+        -DWITH_TURBOJPEG=OFF \
+        -DWITH_JPEG8=ON \
+        -DWITH_SIMD=ON \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        >/dev/null 2>&1
+    make -j$(nproc) >/dev/null 2>&1
+    echo "libjpeg-turbo built successfully"
+    cd /build/src
+else
+    echo "=== libjpeg-turbo already built ==="
+fi
+
+# ============================================================
 # Compile
 # ============================================================
 
@@ -94,10 +144,14 @@ $CC \
     -O2 \
     -Wall \
     -I"$HEADERS" \
+    -I"$LIBJPEG_BUILD" \
+    -I"$LIBJPEG_DIR" \
     -o "$OUT" \
     "$SRC" \
     -L"$LIBDIR" \
+    "$LIBJPEG_BUILD/libjpeg.a" \
     -lrockit \
+    -lm \
     -Wl,-rpath,/oem/usr/lib:/usr/lib \
     -Wl,--allow-shlib-undefined
 
