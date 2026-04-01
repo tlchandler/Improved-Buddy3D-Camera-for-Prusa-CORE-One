@@ -103,7 +103,7 @@ if [ ! -f "$LIBJPEG_BUILD/libjpeg.a" ]; then
     if [ ! -d "$LIBJPEG_DIR" ]; then
         echo "Downloading libjpeg-turbo ${LIBJPEG_VER}..."
         cd /build
-        curl -sL "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/${LIBJPEG_VER}/libjpeg-turbo-${LIBJPEG_VER}.tar.gz" \
+        curl -fsL "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/${LIBJPEG_VER}/libjpeg-turbo-${LIBJPEG_VER}.tar.gz" \
             -o libjpeg-turbo.tar.gz
         tar xzf libjpeg-turbo.tar.gz
         rm libjpeg-turbo.tar.gz
@@ -124,8 +124,8 @@ if [ ! -f "$LIBJPEG_BUILD/libjpeg.a" ]; then
         -DWITH_JPEG8=ON \
         -DWITH_SIMD=ON \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        >/dev/null 2>&1
-    make -j$(nproc) >/dev/null 2>&1
+        >/dev/null
+    make -j$(nproc) >/dev/null
     echo "libjpeg-turbo built successfully"
     cd /build/src
 else
