@@ -132,7 +132,7 @@ static void load_config(void) {
     config.port = DEFAULT_PORT;
     config.capture_mode = MODE_LAYER;
     config.layer_height = 0.2f;
-    config.debounce_seconds = 2.0f;
+    config.debounce_seconds = 3.0f;
     config.interval_seconds = 10.0f;
     config.confirmation_count = 2;
     config.stale_timeout = 120;

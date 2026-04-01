@@ -33,31 +33,31 @@
 /*
  * Minimal JPEG encoder for NV12 (YUV420SP) input.
  * No external library needed — generates valid JFIF files.
- * Quality is modest but sufficient for preview thumbnails.
+ * Improved chrominance quantization for better color fidelity.
  */
 
-/* Standard JPEG luminance quantization table (quality ~75) */
+/* JPEG luminance quantization table (quality ~90, min clamped to 5) */
 static const unsigned char std_lum_qt[64] = {
-     8,  6,  5,  8, 12, 20, 26, 31,
-     6,  6,  7, 10, 13, 29, 30, 28,
-     7,  7,  8, 12, 20, 29, 35, 28,
-     7,  9, 11, 15, 26, 44, 40, 31,
-     9, 11, 19, 28, 34, 55, 52, 39,
-    12, 18, 28, 32, 41, 52, 57, 46,
-    25, 32, 39, 44, 52, 61, 60, 51,
-    36, 46, 48, 49, 56, 50, 52, 50
+     5,  5,  5,  5,  5,  8, 10, 12,
+     5,  5,  5,  5,  5, 12, 12, 11,
+     5,  5,  5,  5,  8, 11, 14, 11,
+     5,  5,  5,  6, 10, 17, 16, 12,
+     5,  5,  7, 11, 14, 22, 21, 15,
+     5,  7, 11, 13, 16, 21, 23, 18,
+    10, 13, 16, 17, 21, 24, 24, 20,
+    14, 18, 19, 20, 22, 20, 21, 20
 };
 
-/* Standard JPEG chrominance quantization table */
+/* JPEG chrominance quantization table (quality ~90, min clamped to 5) */
 static const unsigned char std_chr_qt[64] = {
-     9,  9, 12, 24, 50, 50, 50, 50,
-     9, 11, 13, 33, 50, 50, 50, 50,
-    12, 13, 28, 50, 50, 50, 50, 50,
-    24, 33, 50, 50, 50, 50, 50, 50,
-    50, 50, 50, 50, 50, 50, 50, 50,
-    50, 50, 50, 50, 50, 50, 50, 50,
-    50, 50, 50, 50, 50, 50, 50, 50,
-    50, 50, 50, 50, 50, 50, 50, 50
+     5,  5,  5,  9, 20, 20, 20, 20,
+     5,  5,  5, 13, 20, 20, 20, 20,
+     5,  5, 11, 20, 20, 20, 20, 20,
+     9, 13, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 20, 20, 20, 20
 };
 
 /* Zigzag order */

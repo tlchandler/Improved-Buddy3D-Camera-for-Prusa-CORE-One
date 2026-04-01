@@ -105,13 +105,18 @@ the frame for cleaner snapshots:
 
 ```gcode
 ; === Timelapse Snapshot Pause ===
-; Park head for clean photo, then return
+; Retract, park head for clean photo, return, unretract
+G10
 G1 X0 Y210 F9000
-G4 P2000
+G4 P4000
 G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
+G11
 ```
 
-This adds ~3 seconds per layer. On a 200-layer print, that's about 10 extra
+G10/G11 retract and unretract the filament using the firmware's settings,
+preventing oozing and stringing between the park position and the print.
+The 4-second pause gives the camera time to capture after Z-hops settle
+during the travel move. This adds ~5 seconds per layer. On a 200-layer print, that's about 10 extra
 minutes. The benefit is every frame has a clean, unobstructed view of the print.
 
 **If you're using interval mode on the camera, skip this step.**
@@ -142,9 +147,11 @@ M331 pos_z
 
 ### After layer change G-code (optional, layer mode only)
 ```gcode
+G10
 G1 X0 Y210 F9000
-G4 P2000
+G4 P4000
 G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
+G11
 ```
 
 ### One-time action
