@@ -327,6 +327,13 @@ static void handle_z_update(float z) {
         state.last_z_seen = z;
     }
 
+    /* If Z drops well below last snapshot (e.g. calibration probe → first layer),
+       reset so we don't get stuck waiting for Z to exceed the probe height */
+    if (state.last_snapshot_z > 0 && z < state.last_snapshot_z * 0.5f && z < 10.0f) {
+        LOG_INFO("Z dropped from %.2f to %.2f — resetting layer tracking", state.last_snapshot_z, z);
+        state.last_snapshot_z = -1.0f;
+    }
+
     if (config.capture_mode == MODE_LAYER) {
         /* Layer mode: snapshot when Z advances by layer_height and is stable */
         int z_advanced = (z >= state.last_snapshot_z + config.layer_height - 0.01f);
