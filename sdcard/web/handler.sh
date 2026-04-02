@@ -204,6 +204,7 @@ input[type=range]{width:110px;accent-color:#fa6831}
 .btn:hover{background:#e05520}
 .btn-outline{background:transparent;border:1px solid #334;color:#8899aa;font-weight:500}
 .btn-outline:hover{background:#16213e;color:#ccc}
+.btn-danger{color:#e55;border-color:#533}.btn-danger:hover{background:#3a1520;color:#f77}
 .btn-danger{background:transparent;border:1px solid #643;color:#d98}
 .btn-danger:hover{background:#2a1a1a}
 .btn-blue{background:transparent;border:1px solid #346;color:#8ad}
@@ -437,7 +438,7 @@ HTMLEOF
 
 <div class="card">
 <h2>Firmware</h2>
-<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.2.0</span></div>
+<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.2.1</span></div>
 <div class="svc"><span>Kernel</span><span style="color:#889">${KERNEL}</span></div>
 <div class="svc"><span>System Time</span><span style="color:#889">$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)</span></div>
 </div>
@@ -792,18 +793,6 @@ HTMLEOF
 </form>
 HTMLEOF
 
-    # Past sessions
-    if [ "$PT_SESSIONS" -gt 0 ]; then
-        echo '<div class="card"><h2>Past Print Sessions</h2>'
-        ls -1d /mnt/sdcard/timelapse/[0-9]*_[0-9]* 2>/dev/null | sort -r | head -10 | while read dir; do
-            SNAME=$(basename "$dir")
-            SFRAMES=$(ls "$dir"/frame_*.jpg 2>/dev/null | wc -l)
-            HAS_VIDEO="" ; [ -f "$dir/timelapse.mp4" ] && HAS_VIDEO=" + video"
-            echo "<div class='setting'><label>${SNAME}<span class='hint'>${SFRAMES} frames${HAS_VIDEO}</span></label></div>"
-        done
-        echo '</div>'
-    fi
-
     # Setup instructions
     cat << HTMLEOF
 <details style="margin-top:12px">
@@ -833,17 +822,6 @@ G4 P4000
 G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
 G11</pre>
 <div class="note" style="margin-top:10px">G10/G11 retract and unretract to prevent oozing. The 4-second pause gives the camera time to capture after Z-hops settle. Adds ~5 seconds per layer. Skip this if using interval mode.</div>
-
-<h2 style="margin-top:16px">Video Compilation</h2>
-<p style="font-size:.85em;color:#aab;line-height:1.6">
-The camera does not have enough RAM to encode video on-device.
-To create a timelapse video, pull the SD card and run on your PC
-(requires <a href="https://ffmpeg.org" style="color:#fa6831">ffmpeg</a>):
-</p>
-<div class="note" style="margin-top:10px">
-<code style="color:#ccc">cd timelapse/SESSION_FOLDER</code><br>
-<code style="color:#ccc">ffmpeg -framerate 30 -i frame_%05d.jpg -c:v libx264 -pix_fmt yuv420p timelapse.mp4</code>
-</div>
 </div>
 </details>
 HTMLEOF
@@ -1250,7 +1228,7 @@ HTMLEOF
         ls -1 "$SD/snapshots/" 2>/dev/null | grep '\.jpg$' | sort -r | head -30 | while read FNAME; do
             # Format: 2026-03-30_14-30-00.jpg → 2026-03-30 14:30:00
             DISPLAY=$(echo "$FNAME" | sed 's/\.jpg$//; s/_/ /' | awk -F- '{if(NF>=5) printf "%s-%s-%s %s:%s:%s",$1,$2,$3,$4,$5,$6; else print $0}')
-            echo "<div class='media-item'><span class='name'>${DISPLAY}</span><span class='actions'><a href='/file/snapshots/${FNAME}' class='btn btn-outline btn-sm' target='_blank'>View</a></span></div>"
+            echo "<div class='media-item'><span class='name'>${DISPLAY}</span><span class='actions'><a href='/file/snapshots/${FNAME}' class='btn btn-outline btn-sm' target='_blank'>View</a><form method='POST' action='/delete/snapshot/${FNAME}' style='display:inline;margin:0' onsubmit='return confirm(\"Delete this snapshot?\")'><button type='submit' class='btn btn-outline btn-sm btn-danger'>Delete</button></form></span></div>"
         done
         if [ "$SNAP_COUNT" -gt 30 ]; then
             echo "<div style='font-size:.8em;color:#556;padding:8px 0'>Showing 30 of ${SNAP_COUNT} snapshots</div>"
@@ -1268,7 +1246,7 @@ HTMLEOF
         ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9]*_[0-9]' | sort -r | head -20 | while read SNAME; do
             SDIR="$SD/timelapse/$SNAME"
             SFRAMES=$(ls -1 "$SDIR/" 2>/dev/null | grep -c 'frame_.*\.jpg$')
-            echo "<div class='media-item'><div><span class='name'>${SNAME}</span><br><span class='meta'>${SFRAMES} frames</span></div><span class='actions'><a href='/download/timelapse/${SNAME}' class='btn btn-outline btn-sm'>Download .tar</a></span></div>"
+            echo "<div class='media-item'><div><span class='name'>${SNAME}</span><br><span class='meta'>${SFRAMES} frames</span></div><span class='actions'><a href='/download/timelapse/${SNAME}' class='btn btn-outline btn-sm'>Download .tar</a><form method='POST' action='/delete/timelapse/${SNAME}' style='display:inline;margin:0' onsubmit='return confirm(\"Delete this session and all ${SFRAMES} frames?\")'><button type='submit' class='btn btn-outline btn-sm btn-danger'>Delete</button></form></span></div>"
         done
     else
         echo '<div style="font-size:.85em;color:#556;padding:8px 0">No print timelapse sessions yet.</div>'
@@ -1283,7 +1261,7 @@ HTMLEOF
         ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' | sort -r | head -20 | while read DNAME; do
             DDIR="$SD/timelapse/$DNAME"
             DFRAMES=$(ls -1 "$DDIR/" 2>/dev/null | grep -c '\.jpg$')
-            echo "<div class='media-item'><div><span class='name'>${DNAME}</span><br><span class='meta'>${DFRAMES} frames</span></div><span class='actions'><a href='/download/timelapse/${DNAME}' class='btn btn-outline btn-sm'>Download .tar</a></span></div>"
+            echo "<div class='media-item'><div><span class='name'>${DNAME}</span><br><span class='meta'>${DFRAMES} frames</span></div><span class='actions'><a href='/download/timelapse/${DNAME}' class='btn btn-outline btn-sm'>Download .tar</a><form method='POST' action='/delete/timelapse/${DNAME}' style='display:inline;margin:0' onsubmit='return confirm(\"Delete this capture and all ${DFRAMES} frames?\")'><button type='submit' class='btn btn-outline btn-sm btn-danger'>Delete</button></form></span></div>"
         done
     else
         echo '<div style="font-size:.85em;color:#556;padding:8px 0">No timelapse captures yet. Enable timelapse on the Capture page.</div>'
@@ -1345,6 +1323,36 @@ HTMLEOF
         send_headers "404 Not Found" "text/plain"
         echo "Session not found"
     fi
+    ;;
+
+# ---- DELETE SNAPSHOT ----
+/delete/snapshot/*)
+    FNAME=$(echo "$REQUEST_PATH" | sed 's|^/delete/snapshot/||')
+    FNAME=$(urldecode "$FNAME")
+    case "$FNAME" in *..*|/*|"" ) send_headers "403 Forbidden" "text/plain"; echo "Forbidden"; exit 0 ;; esac
+    FILE="$SD/snapshots/$FNAME"
+    if [ -f "$FILE" ]; then
+        rm -f "$FILE"
+        web_log "Deleted snapshot: $FNAME"
+    else
+        web_log "WARN: Snapshot not found for delete: $FNAME"
+    fi
+    send_redirect "/media"
+    ;;
+
+# ---- DELETE TIMELAPSE SESSION ----
+/delete/timelapse/*)
+    SESSION=$(echo "$REQUEST_PATH" | sed 's|^/delete/timelapse/||')
+    SESSION=$(urldecode "$SESSION")
+    case "$SESSION" in *..*|/*|"" ) send_headers "403 Forbidden" "text/plain"; echo "Forbidden"; exit 0 ;; esac
+    DIR="$SD/timelapse/$SESSION"
+    if [ -d "$DIR" ]; then
+        rm -rf "$DIR"
+        web_log "Deleted timelapse session: $SESSION"
+    else
+        web_log "WARN: Timelapse session not found for delete: $SESSION"
+    fi
+    send_redirect "/media"
     ;;
 
 # ---- LEGACY REDIRECTS ----
