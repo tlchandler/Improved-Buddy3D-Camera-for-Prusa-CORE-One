@@ -34,6 +34,12 @@
 #define BUF_SIZE         4096
 #define MAX_PATH_LEN     512
 
+/* Z-tracking thresholds */
+#define Z_CHANGE_THRESHOLD  0.05f   /* Ignore Z changes smaller than 50 microns (noise) */
+#define WARMUP_Z_MAX        15.0f   /* Z must be below this (mm) before warmup can end */
+#define WARMUP_STABLE_SECS  10.0    /* Z must be stable this long (s) to end warmup */
+#define WARMUP_MIN_SECS     15.0    /* Minimum seconds in PRINTING before warmup ends */
+
 typedef enum { IDLE, PRINTING, FINALIZING } PrintState;
 typedef enum { MODE_LAYER, MODE_INTERVAL } CaptureMode;
 
@@ -61,6 +67,7 @@ static struct {
     time_t print_start_time;
     int consecutive_printing;
     int consecutive_idle;
+    int warmup_done;
 } state;
 
 static volatile int running = 1;
@@ -267,6 +274,7 @@ static void start_print_session(void) {
     state.last_snapshot_z = -1.0f;
     state.last_z_seen = -1.0f;
     state.last_interval_snap = time(NULL);
+    state.warmup_done = 0;
 
     char dir[MAX_PATH_LEN];
     snprintf(dir, sizeof(dir), "%s/%s", config.output_dir, state.print_id);
@@ -322,16 +330,28 @@ static void handle_z_update(float z) {
 
     time_t now = time(NULL);
 
-    if (fabsf(z - state.last_z_seen) > 0.001f) {
+    /* Update Z tracking — 50-micron threshold filters reporting noise/jitter
+       that would otherwise reset the debounce timer every packet */
+    if (fabsf(z - state.last_z_seen) > Z_CHANGE_THRESHOLD) {
         state.last_z_change_time = now;
         state.last_z_seen = z;
     }
 
-    /* If Z drops well below last snapshot (e.g. calibration probe → first layer),
-       reset so we don't get stuck waiting for Z to exceed the probe height */
-    if (state.last_snapshot_z > 0 && z < state.last_snapshot_z * 0.5f && z < 10.0f) {
-        LOG_INFO("Z dropped from %.2f to %.2f — resetting layer tracking", state.last_snapshot_z, z);
-        state.last_snapshot_z = -1.0f;
+    /* Warmup phase: skip calibration moves entirely.
+       The printer reports is_printing=1 during calibration (Z probing, homing,
+       mesh leveling), so we wait for Z to settle at a low, stable position
+       before starting layer tracking. */
+    if (!state.warmup_done) {
+        int z_valid = (z > 0.0f && z < WARMUP_Z_MAX);
+        int z_stable = (difftime(now, state.last_z_change_time) >= WARMUP_STABLE_SECS);
+        int min_elapsed = (difftime(now, state.print_start_time) >= WARMUP_MIN_SECS);
+
+        if (z_valid && z_stable && min_elapsed) {
+            state.warmup_done = 1;
+            state.last_snapshot_z = -1.0f;
+            LOG_INFO("Calibration complete — Z=%.2f stable, starting layer tracking", z);
+        }
+        return;
     }
 
     if (config.capture_mode == MODE_LAYER) {
