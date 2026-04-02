@@ -132,7 +132,7 @@ static void load_config(void) {
     config.port = DEFAULT_PORT;
     config.capture_mode = MODE_LAYER;
     config.layer_height = 0.2f;
-    config.debounce_seconds = 2.0f;
+    config.debounce_seconds = 3.0f;
     config.interval_seconds = 10.0f;
     config.confirmation_count = 2;
     config.stale_timeout = 120;
@@ -325,6 +325,13 @@ static void handle_z_update(float z) {
     if (fabsf(z - state.last_z_seen) > 0.001f) {
         state.last_z_change_time = now;
         state.last_z_seen = z;
+    }
+
+    /* If Z drops well below last snapshot (e.g. calibration probe → first layer),
+       reset so we don't get stuck waiting for Z to exceed the probe height */
+    if (state.last_snapshot_z > 0 && z < state.last_snapshot_z * 0.5f && z < 10.0f) {
+        LOG_INFO("Z dropped from %.2f to %.2f — resetting layer tracking", state.last_snapshot_z, z);
+        state.last_snapshot_z = -1.0f;
     }
 
     if (config.capture_mode == MODE_LAYER) {

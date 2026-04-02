@@ -305,17 +305,21 @@ fi
 mkdir -p $SD/snapshots $SD/timelapse
 
 log "Starting snapshot capture"
-# Copy snapshot_grabber to /tmp (FAT32 has no execute permissions)
+# Copy snapshot_grabber and libjpeg to /tmp (FAT32 has no execute permissions)
 if [ -f "$SD/bin/snapshot_grabber" ]; then
     cp "$SD/bin/snapshot_grabber" /tmp/snapshot_grabber 2>/dev/null && chmod +x /tmp/snapshot_grabber
     log "snapshot_grabber copied to /tmp ($(wc -c < /tmp/snapshot_grabber) bytes)"
+fi
+if [ -f "$SD/bin/libjpeg.so.8" ]; then
+    cp "$SD/bin/libjpeg.so.8" /tmp/libjpeg.so.8 2>/dev/null
+    log "libjpeg.so.8 copied to /tmp ($(wc -c < /tmp/libjpeg.so.8) bytes)"
 fi
 (
     sleep 20
     while true; do
         if [ -x /tmp/snapshot_grabber ]; then
             # Kill after 10s to prevent hung process from blocking the loop
-            /tmp/snapshot_grabber /tmp/buddy_snapshot.jpg 2>/dev/null &
+            LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber /tmp/buddy_snapshot.jpg 2>/dev/null &
             SG_PID=$!
             SG_WAIT=0
             while [ $SG_WAIT -lt 10 ] && kill -0 $SG_PID 2>/dev/null; do

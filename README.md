@@ -1,6 +1,6 @@
 # Buddy3D Camera Custom Firmware Overlay
 
-**Version 0.1.1**
+**Version 0.2.0**
 
 A set of SD card files that replace the cloud-dependent behavior of the **Prusa Buddy3D Camera** (Core One) with a fully local, self-hosted system. The camera hardware is untouched -- all modifications live on a removable microSD card. Remove the card and reboot to restore factory behavior.
 
@@ -136,12 +136,14 @@ The first time you print, the printer's LCD will ask you to approve the metrics 
 For unobstructed photos at each layer change, add this to your **After layer change G-code**:
 
 ```gcode
+G10
 G1 X0 Y210 F9000
-G4 P2000
+G4 P4000
 G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
+G11
 ```
 
-This parks the print head, waits 2 seconds for the camera to capture, then returns. Adds ~3 seconds per layer.
+This retracts the filament, parks the print head, waits 2 seconds for the camera to capture, returns, and unretracts. The retraction prevents oozing and stringing between the park position and the print. The 4-second pause gives the camera time to capture after Z-hops settle. Adds ~5 seconds per layer.
 
 See [`sdcard/docs/prusaslicer_setup.md`](sdcard/docs/prusaslicer_setup.md) for the full setup guide.
 

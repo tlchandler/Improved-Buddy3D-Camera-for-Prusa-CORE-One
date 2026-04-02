@@ -138,7 +138,7 @@ APPAGE
     iwlist wlan0 scan 2>/dev/null | awk '
         /ESSID:/ { gsub(/.*ESSID:"/, ""); gsub(/".*/, ""); essid=$0 }
         /Quality=/ { split($0, a, "="); split(a[2], q, "/"); qual=int(q[1]); printf "%d\t%s\n", qual, essid }
-    ' | sort -rn | awk -F'\t' '!seen[$2]++ { printf "<div style=\"padding:8px;border-bottom:1px solid #30363d;cursor:pointer;font-size:.9em\" onclick=\"document.getElementById(\\\"ap_ssid\\\").value=this.dataset.ssid\" data-ssid=\"%s\"><span style=\"color:#c9d1d9\">%s</span> <span style=\"color:#8b949e;float:right\">%d%%</span></div>\n", $2, $2, $1 }'
+    ' | sort -rn | awk -F'\t' '!seen[$2]++ && $2 != "" { print "<div style=\"padding:8px;border-bottom:1px solid #30363d;cursor:pointer;font-size:.9em\" onclick=\"document.getElementById('"'"'ap_ssid'"'"').value='"'"'" $2 "'"'"';\"><span style=\"color:#c9d1d9\">" $2 "</span> <span style=\"color:#8b949e;float:right\">" $1 "%</span></div>" }'
     echo '</div><div style="font-size:.8em;color:#8b949e;margin-top:4px">Tap a network to fill it in below.</div></div>'
     cat << 'APPAGE2'
 <form method="POST" action="/save/wifi">
@@ -437,7 +437,7 @@ HTMLEOF
 
 <div class="card">
 <h2>Firmware</h2>
-<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.1.1</span></div>
+<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.2.0</span></div>
 <div class="svc"><span>Kernel</span><span style="color:#889">${KERNEL}</span></div>
 <div class="svc"><span>System Time</span><span style="color:#889">$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)</span></div>
 </div>
@@ -827,10 +827,12 @@ the metrics destination. Press <b>Yes</b>. This persists across power cycles.
 <p style="font-size:.85em;color:#aab;line-height:1.6;margin-bottom:12px">
 For layer mode: add to <b>After layer change G-code</b> to park the print head during capture:
 </p>
-<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">G1 X0 Y210 F9000
-G4 P2000
-G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000</pre>
-<div class="note" style="margin-top:10px">Adds ~3 seconds per layer. Skip this if using interval mode.</div>
+<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">G10
+G1 X0 Y210 F9000
+G4 P4000
+G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
+G11</pre>
+<div class="note" style="margin-top:10px">G10/G11 retract and unretract to prevent oozing. The 4-second pause gives the camera time to capture after Z-hops settle. Adds ~5 seconds per layer. Skip this if using interval mode.</div>
 
 <h2 style="margin-top:16px">Video Compilation</h2>
 <p style="font-size:.85em;color:#aab;line-height:1.6">
@@ -974,8 +976,7 @@ HTMLEOF
     iwlist wlan0 scan 2>/dev/null | awk '
         /ESSID:/ { gsub(/.*ESSID:"/, ""); gsub(/".*/, ""); essid=$0 }
         /Quality=/ { split($0, a, "="); split(a[2], q, "/"); qual=int(q[1]); printf "%d\t%s\n", qual, essid }
-    ' | sort -rn | awk -F'\t' '!seen[$2]++ { printf "<div class=\"svc\" style=\"cursor:pointer\" onclick=\"document.getElementById(\\\"wifi_ssid\\\").value=this.dataset.ssid\" data-ssid=\"%s\"><span>%s</span><span style=\"color:#889\">%d%%</span></div>\n", $2, $2, $1 }'
-    SCAN_COUNT=$(iwlist wlan0 scan 2>/dev/null | grep -c "ESSID:")
+    ' | sort -rn | awk -F'\t' '!seen[$2]++ && $2 != "" { print "<div class=\"svc\" style=\"cursor:pointer\" onclick=\"document.getElementById('"'"'wifi_ssid'"'"').value='"'"'" $2 "'"'"';\"><span>" $2 "</span><span style=\"color:#889\">" $1 "%</span></div>" }'
     [ "$SCAN_COUNT" -eq 0 ] && echo '<div style="font-size:.85em;color:#556;padding:8px 0">No networks found. Try again in a moment.</div>'
     cat << HTMLEOF
 </div>
@@ -1078,11 +1079,15 @@ WPAEOF
             fi
         fi
         web_log "WiFi config updated — SSID: $W_SSID"
-        # Reconfigure wpa_supplicant live (may disconnect briefly)
-        wpa_cli -i wlan0 reconfigure 2>/dev/null
+        # Reconfigure wpa_supplicant live (skip in AP mode — no wpa_supplicant running)
+        [ ! -f /tmp/buddy_ap_mode ] && wpa_cli -i wlan0 reconfigure 2>/dev/null
     fi
     sync
-    send_redirect "/network?saved=1"
+    if [ -f /tmp/buddy_ap_mode ]; then
+        send_redirect "/?saved=1"
+    else
+        send_redirect "/network?saved=1"
+    fi
     ;;
 
 # ---- SECURITY PAGE ----
