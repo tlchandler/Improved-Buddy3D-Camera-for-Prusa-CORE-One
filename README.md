@@ -37,7 +37,7 @@ A set of SD card files that replace the cloud-dependent behavior of the **Prusa 
 
 ### 1. Prepare the SD Card
 
-- Use a microSD card (any size, 1 GB is plenty)
+- Use a microSD card (any size, 4 GB is plenty)
 - **Format as FAT32** (important -- the camera cannot read exFAT or NTFS)
 
 ### 2. Copy Files
