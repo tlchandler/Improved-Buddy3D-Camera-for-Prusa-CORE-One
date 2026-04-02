@@ -2,7 +2,7 @@
  * snapshot_grabber — JPEG snapshot from VI frame via libjpeg-turbo
  *
  * Grabs a raw NV12 frame from VI channel 0 (owned by lp_app),
- * converts to JPEG using libjpeg-turbo (statically linked).
+ * converts to JPEG using libjpeg-turbo (dynamically linked).
  *
  * No VENC channel needed — the RV1103 only has 2 (both used by lp_app).
  *
