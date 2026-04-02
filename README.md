@@ -1,4 +1,4 @@
-# Buddy3D Camera Custom Firmware Overlay
+# Buddy3D Camera for CORE One Custom Firmware Overlay
 
 **Version 0.2.1**
 
