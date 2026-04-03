@@ -221,6 +221,25 @@ Any stock sound without a matching file in `sounds/` plays normally.
 | RTSP | `rtsp://<camera-ip>/live` | Live video (VLC, Home Assistant, etc.) |
 | Telnet | `telnet <camera-ip>` port 23 | Root shell (disabled by default) |
 
+### Telnet Access
+
+Telnet gives you a root shell on the camera for debugging and advanced configuration.
+
+1. **Enable telnet** in the web UI (Security page), then reboot the camera.
+2. **Connect** from a terminal:
+   ```
+   telnet <camera-ip>
+   ```
+3. **Log in** when prompted:
+   - Username: `root`
+   - Password: `rockchip`
+4. You now have a root shell. Type `exit` to disconnect.
+
+**Troubleshooting:**
+- **"Could not open connection"** -- Telnet is not enabled. Enable it in the web UI under Security and reboot.
+- **Connection drops immediately** -- The telnet service on the camera can be flaky. Just try again, including possibly restarting the camera.
+- **Windows says `telnet` is not recognized** -- The Telnet client is not installed by default on Windows 10/11. Enable it via Settings > Apps > Optional Features > Telnet Client. Alternatively, use [PuTTY](https://www.putty.org/) in Telnet mode connecting to your camera's IP on port 23.
+
 ## SD Card File Layout (at runtime)
 
 ```
