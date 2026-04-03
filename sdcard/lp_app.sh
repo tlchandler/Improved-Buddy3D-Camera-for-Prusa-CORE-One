@@ -83,7 +83,7 @@ if [ ! -f "$SETTINGS" ]; then
 [config]
 rtsp_server_mode=2
 cloud_enabled=1
-video_quality=6
+video_quality=1
 volume=40
 ir_mode=1
 audio_announcements=1
@@ -91,6 +91,9 @@ telnet_enabled=0
 timelapse_enabled=0
 timelapse_interval=60
 ntp_server=pool.ntp.org
+rtsp_resolution=fhd
+rtsp_bitrate=
+rtsp_fps=
 EOF
 fi
 
@@ -111,6 +114,7 @@ while IFS='=' read -r key val; do
         ota_updates_enabled) ;; # handled separately below
         timelapse_enabled|timelapse_interval) ;; # handled separately below
         telnet_enabled|web_username|web_password) ;; # handled separately below
+        rtsp_resolution|rtsp_bitrate|rtsp_fps) ;; # handled by RTSP patch below
         pt_*) ;; # print timelapse settings, handled by the binary
         ip_mode|static_ip|static_mask|static_gateway|static_dns) ;; # handled separately below
         ntp_server) ;; # handled separately below
@@ -520,10 +524,87 @@ APEOF
 fi
 
 # ============================================================
+# RTSP BITRATE + FPS PATCH (runtime binary modification)
+# ============================================================
+# lp_app hardcodes H264 CBR bitrates and 25fps frame rate.
+# Resolution is controlled by video_quality in xhr_config.ini:
+#   FHD = quality 1, HD = quality 6, SD = quality 5
+#
+# Bitrate patch (offset 368808): replaces resolution-check sequence with
+#   unconditional MOVW + STR + B to set any bitrate for any resolution.
+# FPS patch (offset 368884): single byte change in MOV R2, #25 instruction
+#   that sets both SrcFrameRate and DstFrameRate.
+# GOP patch (offset 368880): single byte in MOV R3, #50 (kept at 2x FPS).
+#
+# Patched binary lives on /userdata/ (UBIFS flash, not tmpfs RAM) to avoid OOM.
+# Remove the SD card and the original runs untouched.
+
+# Clean up any leftover patched binary from previous boot
+rm -f /userdata/lp_app_patched
+
+RTSP_BR=$(get_setting rtsp_bitrate "")
+RTSP_FPS=$(get_setting rtsp_fps "")
+NEED_PATCH=0
+[ -n "$RTSP_BR" ] && [ "$RTSP_BR" -ge 250 ] 2>/dev/null && [ "$RTSP_BR" -le 6500 ] 2>/dev/null && NEED_PATCH=1
+[ -n "$RTSP_FPS" ] && [ "$RTSP_FPS" -ge 5 ] 2>/dev/null && [ "$RTSP_FPS" -le 25 ] 2>/dev/null && NEED_PATCH=1
+
+if [ "$NEED_PATCH" = "1" ]; then
+    cp /oem/usr/sbin/lp_app /userdata/lp_app_patched
+    _P=/userdata/lp_app_patched
+
+    # Helper: write one byte via dd (handles 0x00 null bytes correctly)
+    write_byte() {
+        _off=$1 ; _hex=$2
+        if [ "$_hex" = "00" ]; then
+            dd if=/dev/zero of=$_P bs=1 seek=$_off count=1 conv=notrunc 2>/dev/null
+        else
+            printf "\\x${_hex}" | dd of=$_P bs=1 seek=$_off conv=notrunc 2>/dev/null
+        fi
+    }
+
+    # --- Bitrate patch ---
+    if [ -n "$RTSP_BR" ] && [ "$RTSP_BR" -ge 250 ] 2>/dev/null && [ "$RTSP_BR" -le 6500 ] 2>/dev/null; then
+        # Encode ARM32 MOVW R3, #bitrate: 0xE300_3000 | (imm4 << 16) | imm12
+        IMM12=$(( RTSP_BR & 0xFFF ))
+        IMM4=$(( (RTSP_BR >> 12) & 0xF ))
+        B0=$(printf '%02x' $(( IMM12 & 0xFF )))
+        B1=$(printf '%02x' $(( 0x30 | ((IMM12 >> 8) & 0xF) )))
+        B2=$(printf '%02x' $(( IMM4 )))
+        # Offset 368808: MOVW R3, #bitrate
+        write_byte 368808 "$B0" ; write_byte 368809 "$B1"
+        write_byte 368810 "$B2" ; write_byte 368811 "e3"
+        # Offset 368812: STR R3, [SP, #0x94]
+        write_byte 368812 "94" ; write_byte 368813 "30"
+        write_byte 368814 "8d" ; write_byte 368815 "e5"
+        # Offset 368816: B +2 → skip to common code
+        write_byte 368816 "02" ; write_byte 368817 "00"
+        write_byte 368818 "00" ; write_byte 368819 "ea"
+        log "Patched RTSP bitrate -> ${RTSP_BR} kbps"
+    fi
+
+    # --- FPS patch ---
+    if [ -n "$RTSP_FPS" ] && [ "$RTSP_FPS" -ge 5 ] 2>/dev/null && [ "$RTSP_FPS" -le 25 ] 2>/dev/null; then
+        FPS_HEX=$(printf '%02x' "$RTSP_FPS")
+        GOP_VAL=$(( RTSP_FPS * 2 ))
+        GOP_HEX=$(printf '%02x' "$GOP_VAL")
+        # Offset 368884: MOV R2, #fps (byte 0 of instruction = immediate value)
+        write_byte 368884 "$FPS_HEX"
+        # Offset 368880: MOV R3, #gop (byte 0 of instruction = immediate value)
+        write_byte 368880 "$GOP_HEX"
+        log "Patched RTSP FPS -> ${RTSP_FPS} fps (GOP=${GOP_VAL})"
+    fi
+
+    chmod +x /userdata/lp_app_patched
+    LP_APP_CMD="/userdata/lp_app_patched"
+else
+    LP_APP_CMD="lp_app"
+fi
+
+# ============================================================
 # START CAMERA APP
 # ============================================================
 
 log "Starting lp_app (main camera application)"
 sync
-lp_app --noshell --log2file $SD/logs
+$LP_APP_CMD --noshell --log2file $SD/logs
 log_err "lp_app exited unexpectedly (exit code: $?)"

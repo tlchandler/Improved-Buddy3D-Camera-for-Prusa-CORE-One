@@ -458,7 +458,10 @@ HTMLEOF
     CAMERA_NAME=$(html_escape "$(get_setting camera_name 'Buddy3D Camera')")
     IR_MODE=$(get_setting ir_mode "1")
     RTSP_MODE=$(get_setting rtsp_server_mode "2")
-    VIDEO_QUALITY=$(get_setting video_quality "6")
+    RTSP_RES=$(get_setting rtsp_resolution "fhd")
+    RTSP_BR=$(get_setting rtsp_bitrate "")
+    RTSP_FPS=$(get_setting rtsp_fps "")
+    [ -z "$RTSP_FPS" ] && RTSP_FPS=25
     VOLUME=$(get_setting volume "40")
     UPLOAD_INTERVAL=$(html_escape "$(get_setting snapshot_upload_interval '10000')")
     AUDIO_MODE=$(get_setting audio_announcements "1")
@@ -467,6 +470,10 @@ HTMLEOF
 
     IR_AUTO="" IR_DAY="" IR_NIGHT=""
     case "$IR_MODE" in 0) IR_DAY="selected";; 1) IR_AUTO="selected";; 2) IR_NIGHT="selected";; *) IR_AUTO="selected";; esac
+
+    RES_FHD="" ; RES_HD="" ; RES_SD=""
+    case "$RTSP_RES" in hd) RES_HD="selected";; sd) RES_SD="selected";; *) RES_FHD="selected";; esac
+    [ -z "$RTSP_BR" ] && case "$RTSP_RES" in hd) RTSP_BR=2500;; sd) RTSP_BR=900;; *) RTSP_BR=6500;; esac
 
     RTSP_CHK="" ; [ "$RTSP_MODE" = "2" ] && RTSP_CHK="checked"
     CLOUD_CHK="" ; [ "$CLOUD_ENABLED" = "1" ] && CLOUD_CHK="checked"
@@ -530,12 +537,24 @@ application_exit.wav</code>
 </select>
 </div>
 <div class="setting">
-<label>Video Quality<span class="hint">1 = lowest, 10 = highest</span></label>
-<div><input type="range" name="video_quality" min="1" max="10" value="${VIDEO_QUALITY}" oninput="this.nextElementSibling.textContent=this.value"><span class="range-val">${VIDEO_QUALITY}</span></div>
-</div>
-<div class="setting">
 <label>RTSP Streaming</label>
 <label class="toggle"><input type="checkbox" name="rtsp_server_mode" value="2" ${RTSP_CHK}><span class="sl"></span></label>
+</div>
+<div class="setting">
+<label>RTSP Resolution</label>
+<select name="rtsp_resolution">
+<option value="fhd" ${RES_FHD}>1080p (1920x1080)</option>
+<option value="hd" ${RES_HD}>720p (1280x720)</option>
+<option value="sd" ${RES_SD}>480p (640x480)</option>
+</select>
+</div>
+<div class="setting">
+<label>RTSP Bitrate<span class="hint">kbps (lower = less bandwidth)</span></label>
+<div><input type="range" name="rtsp_bitrate" min="250" max="6500" step="250" value="${RTSP_BR}" oninput="this.nextElementSibling.textContent=this.value+' kbps'"><span class="range-val">${RTSP_BR} kbps</span></div>
+</div>
+<div class="setting">
+<label>RTSP Frame Rate<span class="hint">fps (lower = less bandwidth)</span></label>
+<div><input type="range" name="rtsp_fps" min="5" max="25" step="5" value="${RTSP_FPS}" oninput="this.nextElementSibling.textContent=this.value+' fps'"><span class="range-val">${RTSP_FPS} fps</span></div>
 </div>
 </div>
 
@@ -546,16 +565,16 @@ application_exit.wav</code>
 <label class="toggle"><input type="checkbox" name="cloud_enabled" value="1" ${CLOUD_CHK}><span class="sl"></span></label>
 </div>
 <div class="setting">
-<label>Firmware Updates<span class="hint">Allow Prusa OTA firmware updates</span></label>
-<label class="toggle"><input type="checkbox" name="ota_updates_enabled" value="1" ${OTA_CHK}><span class="sl"></span></label>
-</div>
-<div class="setting">
 <label>PrusaConnect Token<span class="hint">From PrusaConnect app &gt; Camera &gt; Token</span></label>
 <input type="text" name="prusa_token" value="${PRUSA_TOKEN}" placeholder="Paste token here">
 </div>
 <div class="setting">
 <label>Upload Interval<span class="hint">ms between snapshots (if cloud on)</span></label>
 <input type="text" name="snapshot_upload_interval" value="${UPLOAD_INTERVAL}">
+</div>
+<div class="setting">
+<label>Firmware Updates<span class="hint">Allow Prusa OTA firmware updates</span></label>
+<label class="toggle"><input type="checkbox" name="ota_updates_enabled" value="1" ${OTA_CHK}><span class="sl"></span></label>
 </div>
 </div>
 
@@ -580,7 +599,13 @@ HTMLEOF
     CN=$(urldecode "$(get_field camera_name)")
     update_setting camera_name "$CN"
     update_setting ir_mode "$(get_field ir_mode)"
-    update_setting video_quality "$(get_field video_quality)"
+    # Resolution → video_quality mapping: fhd=1, hd=6, sd=5
+    RRES=$(get_field rtsp_resolution)
+    case "$RRES" in fhd) update_setting video_quality "1";; sd) update_setting video_quality "5";; *) update_setting video_quality "6";; esac
+    update_setting rtsp_resolution "$RRES"
+    update_setting rtsp_bitrate "$(get_field rtsp_bitrate)"
+    RFPS=$(get_field rtsp_fps)
+    [ -n "$RFPS" ] && update_setting rtsp_fps "$RFPS"
     update_setting volume "$(get_field volume)"
     update_setting snapshot_upload_interval "$(get_field snapshot_upload_interval)"
     PT=$(urldecode "$(get_field prusa_token)")

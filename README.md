@@ -9,7 +9,7 @@ A set of SD card files that replace the cloud-dependent behavior of the **Prusa 
 ## Features
 
 - **Local web UI** -- configure camera settings, view live snapshots, manage media, all from your browser
-- **RTSP streaming** -- view the live feed in VLC, Home Assistant, or any RTSP client at `rtsp://<camera-ip>/live`
+- **RTSP streaming** -- view the live feed in VLC, Home Assistant, or any RTSP client at `rtsp://<camera-ip>/live`, with configurable resolution (1080p/720p/480p), bitrate (250-6500 kbps), and frame rate (5-25 fps)
 - **Cloud blocking** -- optionally block all Prusa cloud endpoints so the camera operates fully offline
 - **OTA firmware updates** -- independent toggle to allow or block Prusa firmware updates
 - **WiFi AP fallback** -- automatic access point if WiFi isn't configured, with a dedicated setup page
@@ -99,7 +99,7 @@ This works because `lp_app.sh` restores factory configuration files every boot b
 |------|-------------|
 | **Status** | System dashboard -- uptime, temperature, memory, disk usage, network, services, active print |
 | **Media** | Browse and download snapshots, timelapse frames, and print timelapse sessions |
-| **Settings** | Camera name, volume, audio mode, IR/night mode, video quality, RTSP, cloud, OTA updates |
+| **Settings** | Camera name, volume, audio mode, IR/night mode, RTSP (streaming toggle, resolution, bitrate, frame rate), cloud, OTA updates |
 | **Capture** | Live JPEG preview, take snapshots, configure timelapse intervals, print timelapse settings |
 | **Network** | WiFi signal, SSID, IP info, DHCP/static toggle, NTP server |
 | **Security** | Web UI password, telnet toggle |
