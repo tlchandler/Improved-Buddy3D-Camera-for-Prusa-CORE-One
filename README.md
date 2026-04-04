@@ -151,6 +151,8 @@ See [`sdcard/docs/prusaslicer_setup.md`](sdcard/docs/prusaslicer_setup.md) for t
 
 The camera has only ~7 MB of free RAM at runtime, which is not enough to run a video encoder. Timelapse frames are saved as individual JPEG files and must be compiled into video on your PC.
 
+**Note:** Print timelapse captures start as soon as the printer reports `is_printing` and Z begins moving, which includes calibration (homing, bed probing, mesh leveling). The first several frames may show calibration moves rather than actual printing. Delete these early frames from the session folder before compiling the video.
+
 ### Using the included script
 
 ```bash

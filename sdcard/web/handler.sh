@@ -1311,7 +1311,8 @@ To create a timelapse video, pull the SD card and run on your PC (requires <a hr
 <code style="font-size:.95em;color:#ccc">ffmpeg -framerate 30 -i frame_%05d.jpg -c:v libx264 -pix_fmt yuv420p timelapse.mp4</code><br>
 <b>Regular timelapses</b> (timestamped frames):<br>
 <code style="font-size:.95em;color:#ccc">ffmpeg -framerate 30 -pattern_type glob -i "*.jpg" -c:v libx264 -pix_fmt yuv420p timelapse.mp4</code><br>
-Copy the resulting <code>timelapse.mp4</code> back to the session folder on the SD card to view it here.
+Copy the resulting <code>timelapse.mp4</code> back to the session folder on the SD card to view it here.<br>
+<b>Tip:</b> Print timelapse sessions may include early frames from printer calibration (homing, bed probing). Delete these before compiling the video.
 </div>
 HTMLEOF
 
