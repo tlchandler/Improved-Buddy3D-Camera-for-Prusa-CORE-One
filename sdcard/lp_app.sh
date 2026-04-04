@@ -472,11 +472,16 @@ else
     [ -z "$AP_SUFFIX" ] && AP_SUFFIX="0000"
     AP_SSID="Buddy3D-${AP_SUFFIX}"
 
+    # Clean shutdown of station mode — fully release the interface
     killall wpa_supplicant 2>/dev/null
     killall udhcpc 2>/dev/null
+    sleep 2
+    ifconfig wlan0 down 2>/dev/null
+    sleep 1
+    ifconfig wlan0 up 2>/dev/null
     sleep 1
 
-    # Start hostapd first (takes control of wlan0)
+    # Start hostapd (takes control of wlan0)
     cat > /tmp/hostapd.conf << HAPEOF
 interface=wlan0
 driver=nl80211
@@ -487,17 +492,38 @@ auth_algs=1
 wpa=0
 HAPEOF
     hostapd -B /tmp/hostapd.conf
-    sleep 1
+    # Wait for hostapd to actually be running (up to 5s)
+    _ap_wait=0
+    while [ $_ap_wait -lt 5 ]; do
+        pidof hostapd >/dev/null 2>&1 && break
+        sleep 1
+        _ap_wait=$((_ap_wait + 1))
+    done
+    if ! pidof hostapd >/dev/null 2>&1; then
+        log_err "hostapd failed to start — retrying"
+        hostapd -B /tmp/hostapd.conf
+        sleep 3
+    fi
 
-    # Set IP after hostapd is running (hostapd resets the interface)
-    ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up
-    sleep 2
+    # Set IP — retry until it sticks (hostapd may reset the interface)
+    _ip_wait=0
+    while [ $_ip_wait -lt 5 ]; do
+        ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up 2>/dev/null
+        sleep 1
+        ifconfig wlan0 2>/dev/null | grep -q '192.168.4.1' && break
+        _ip_wait=$((_ip_wait + 1))
+    done
+    if ! ifconfig wlan0 2>/dev/null | grep -q '192.168.4.1'; then
+        log_err "Failed to set AP IP address after retries"
+    fi
 
     # Start DHCP server
     cat > /tmp/udhcpd_ap.conf << 'APEOF'
 start 192.168.4.100
 end 192.168.4.200
 interface wlan0
+max_leases 20
+pidfile /tmp/udhcpd.pid
 option subnet 255.255.255.0
 option router 192.168.4.1
 option dns 192.168.4.1
@@ -505,13 +531,24 @@ option lease 3600
 APEOF
     mkdir -p /var/lib/misc
     touch /var/lib/misc/udhcpd.leases
-    udhcpd /tmp/udhcpd_ap.conf &
+    udhcpd /tmp/udhcpd_ap.conf
 
     log "AP mode started (SSID: ${AP_SSID}) — connect to configure WiFi at http://192.168.4.1/"
 
-    # Stay alive — web server is already running, just wait here
-    # When the user configures WiFi and reboots, lp_app will start normally
-    while true; do sleep 3600; done
+    # Monitor loop: restart udhcpd if it dies, re-set IP if lost
+    while true; do
+        sleep 30
+        # Ensure IP is still set (hostapd or driver can reset it)
+        if ! ifconfig wlan0 2>/dev/null | grep -q '192.168.4.1'; then
+            log "AP IP lost — re-applying"
+            ifconfig wlan0 192.168.4.1 netmask 255.255.255.0 up 2>/dev/null
+        fi
+        # Ensure udhcpd is still running
+        if [ ! -f /tmp/udhcpd.pid ] || ! kill -0 "$(cat /tmp/udhcpd.pid 2>/dev/null)" 2>/dev/null; then
+            log "udhcpd died — restarting"
+            udhcpd /tmp/udhcpd_ap.conf
+        fi
+    done
 fi
 
 # ============================================================
