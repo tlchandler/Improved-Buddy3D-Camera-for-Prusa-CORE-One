@@ -27,7 +27,8 @@
  * ============================================================ */
 
 #define CONFIG_FILE      "/mnt/sdcard/buddy_settings.ini"
-#define SNAPSHOT_SRC     "/tmp/buddy_snapshot.jpg"
+#define SNAPSHOT_CMD     "nice -n 19 LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber"
+#define SNAPSHOT_TMP     "/tmp/buddy_pt_snap.jpg"
 #define STATUS_FILE      "/tmp/print_timelapse_status"
 #define LOG_FILE         "/mnt/sdcard/logs/print_timelapse.log"
 #define DEFAULT_PORT     8514
@@ -224,34 +225,45 @@ static void mkdir_p(const char *path) {
 static void take_snapshot(float z) {
     char dir[MAX_PATH_LEN];
     char filepath[MAX_PATH_LEN];
+    char cmd[MAX_PATH_LEN + 128];
 
     snprintf(dir, sizeof(dir), "%s/%s", config.output_dir, state.print_id);
     mkdir_p(dir);
 
     snprintf(filepath, sizeof(filepath), "%s/frame_%05d.jpg", dir, state.frame_counter);
 
-    /* Copy snapshot source to session directory */
-    FILE *src = fopen(SNAPSHOT_SRC, "rb");
-    if (!src) {
-        LOG_WARN("Cannot open snapshot source %s", SNAPSHOT_SRC);
+    /* Run snapshot_grabber directly to capture a fresh frame on demand.
+     * This avoids relying on the background capture loop, so snapshots
+     * are only taken when actually needed (layer change or interval). */
+    snprintf(cmd, sizeof(cmd), "%s %s", SNAPSHOT_CMD, SNAPSHOT_TMP);
+    int ret = system(cmd);
+    if (ret != 0) {
+        LOG_WARN("snapshot_grabber failed (exit %d)", ret);
         return;
     }
 
-    FILE *dst = fopen(filepath, "wb");
-    if (!dst) {
+    /* Move captured frame to session directory */
+    if (rename(SNAPSHOT_TMP, filepath) != 0) {
+        /* rename fails across filesystems (tmpfs -> sdcard), fall back to copy */
+        FILE *src = fopen(SNAPSHOT_TMP, "rb");
+        if (!src) {
+            LOG_WARN("Cannot open captured snapshot %s", SNAPSHOT_TMP);
+            return;
+        }
+        FILE *dst = fopen(filepath, "wb");
+        if (!dst) {
+            fclose(src);
+            LOG_WARN("Cannot create frame file %s", filepath);
+            return;
+        }
+        char buf[8192];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), src)) > 0)
+            fwrite(buf, 1, n, dst);
         fclose(src);
-        LOG_WARN("Cannot create frame file %s", filepath);
-        return;
+        fclose(dst);
+        unlink(SNAPSHOT_TMP);
     }
-
-    char buf[8192];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
-        fwrite(buf, 1, n, dst);
-    }
-
-    fclose(src);
-    fclose(dst);
 
     LOG_INFO("Frame %d at Z=%.2fmm -> %s", state.frame_counter, z, filepath);
     state.frame_counter++;

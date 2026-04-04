@@ -303,13 +303,16 @@ else
 fi
 
 # ============================================================
-# SNAPSHOT CAPTURE (background loop for live preview)
+# SNAPSHOT CAPTURE SETUP
 # ============================================================
+# No background loop — all snapshot consumers capture on demand:
+#   - Preview page: /snapshot.jpg handler runs snapshot_grabber per request
+#   - Always-on timelapse: its own loop runs snapshot_grabber at configured interval
+#   - Print timelapse: binary runs snapshot_grabber on layer change / interval
+# Copy binaries to /tmp since FAT32 has no execute permissions.
 
 mkdir -p $SD/snapshots $SD/timelapse
 
-log "Starting snapshot capture"
-# Copy snapshot_grabber and libjpeg to /tmp (FAT32 has no execute permissions)
 if [ -f "$SD/bin/snapshot_grabber" ]; then
     cp "$SD/bin/snapshot_grabber" /tmp/snapshot_grabber 2>/dev/null && chmod +x /tmp/snapshot_grabber
     log "snapshot_grabber copied to /tmp ($(wc -c < /tmp/snapshot_grabber) bytes)"
@@ -318,24 +321,6 @@ if [ -f "$SD/bin/libjpeg.so.8" ]; then
     cp "$SD/bin/libjpeg.so.8" /tmp/libjpeg.so.8 2>/dev/null
     log "libjpeg.so.8 copied to /tmp ($(wc -c < /tmp/libjpeg.so.8) bytes)"
 fi
-(
-    sleep 20
-    while true; do
-        if [ -x /tmp/snapshot_grabber ]; then
-            # Kill after 10s to prevent hung process from blocking the loop
-            LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber /tmp/buddy_snapshot.jpg 2>/dev/null &
-            SG_PID=$!
-            SG_WAIT=0
-            while [ $SG_WAIT -lt 10 ] && kill -0 $SG_PID 2>/dev/null; do
-                sleep 1
-                SG_WAIT=$((SG_WAIT + 1))
-            done
-            kill -0 $SG_PID 2>/dev/null && kill -9 $SG_PID 2>/dev/null
-            wait $SG_PID 2>/dev/null
-        fi
-        sleep 5
-    done
-) &
 
 # ============================================================
 # TIMELAPSE (background process)
@@ -348,14 +333,20 @@ log "Starting timelapse background process"
         TL_ON=$(grep "^timelapse_enabled=" "$SETTINGS" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '\r')
         TL_INT=$(grep "^timelapse_interval=" "$SETTINGS" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '\r')
         [ -z "$TL_INT" ] && TL_INT=60
-        if [ "$TL_ON" = "1" ] && [ -f /tmp/buddy_snapshot.jpg ] && [ "$(wc -c < /tmp/buddy_snapshot.jpg 2>/dev/null)" -gt 1000 ]; then
-            DIR="$SD/timelapse/$(date +%Y-%m-%d)"
-            mkdir -p "$DIR"
-            FNAME="$DIR/$(date +%H-%M-%S).jpg"
-            if cp /tmp/buddy_snapshot.jpg "$FNAME" 2>/dev/null; then
-                sync
-            else
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to save timelapse frame: $FNAME" >> "$LOGFILE"
+        if [ "$TL_ON" = "1" ] && [ -x /tmp/snapshot_grabber ]; then
+            # Capture directly to the timelapse folder (no background loop dependency)
+            TL_TMP="/tmp/buddy_tl_snap.jpg"
+            nice -n 19 LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber "$TL_TMP" 2>/dev/null
+            if [ -f "$TL_TMP" ] && [ "$(wc -c < "$TL_TMP" 2>/dev/null)" -gt 1000 ]; then
+                DIR="$SD/timelapse/$(date +%Y-%m-%d)"
+                mkdir -p "$DIR"
+                FNAME="$DIR/$(date +%H-%M-%S).jpg"
+                if cp "$TL_TMP" "$FNAME" 2>/dev/null; then
+                    sync
+                else
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to save timelapse frame: $FNAME" >> "$LOGFILE"
+                fi
+                rm -f "$TL_TMP"
             fi
         fi
         sleep "${TL_INT:-60}"

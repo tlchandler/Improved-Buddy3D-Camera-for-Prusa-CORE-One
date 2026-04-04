@@ -721,9 +721,10 @@ var img=document.getElementById('preview');
 setInterval(function(){
     var t=new Date().getTime();
     img.src='/snapshot.jpg?t='+t;
-},5000);
+},10000);
 </script>
-<div class="note" style="margin-top:8px">Auto-refreshes every 5 seconds. For full video: <b>rtsp://${CAM_IP}/live</b></div>
+<div class="note" style="margin-top:8px">Auto-refreshes every 10 seconds. For full video: <b>rtsp://${CAM_IP}/live</b><br>
+<b>Note:</b> Leaving this page open while streaming RTSP may cause video hiccups. Close this page if you need smooth RTSP playback.</div>
 </div>
 
 <div class="card">
@@ -856,6 +857,10 @@ HTMLEOF
 # ---- SAVE SNAPSHOT ----
 /save/snapshot)
     mkdir -p "$SD/snapshots"
+    # Capture a fresh frame for the saved snapshot
+    if [ -x /tmp/snapshot_grabber ]; then
+        nice -n 19 LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber /tmp/buddy_snapshot.jpg 2>/dev/null
+    fi
     FNAME="$SD/snapshots/$(date +%Y-%m-%d_%H-%M-%S).jpg"
     if cp /tmp/buddy_snapshot.jpg "$FNAME" 2>/dev/null; then
         web_log "Snapshot saved: $FNAME"
@@ -881,6 +886,10 @@ HTMLEOF
 
 # ---- SNAPSHOT IMAGE ----
 /snapshot.jpg)
+    # Capture a fresh frame on demand (no background loop)
+    if [ -x /tmp/snapshot_grabber ]; then
+        nice -n 19 LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber /tmp/buddy_snapshot.jpg 2>/dev/null
+    fi
     if [ -f /tmp/buddy_snapshot.jpg ] && [ "$(wc -c < /tmp/buddy_snapshot.jpg 2>/dev/null)" -gt 1000 ]; then
         SIZE=$(wc -c < /tmp/buddy_snapshot.jpg)
         printf "HTTP/1.0 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: ${SIZE}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
