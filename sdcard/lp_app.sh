@@ -471,14 +471,19 @@ else
     [ -z "$AP_SUFFIX" ] && AP_SUFFIX="0000"
     AP_SSID="Buddy3D-${AP_SUFFIX}"
 
-    # Clean shutdown of station mode — fully release the interface
+    # Clean shutdown of station mode — kill everything, fully release wlan0
+    killall hostapd 2>/dev/null
     killall wpa_supplicant 2>/dev/null
     killall udhcpc 2>/dev/null
+    killall udhcpd 2>/dev/null
     sleep 2
     ifconfig wlan0 down 2>/dev/null
-    sleep 1
+    sleep 2
     ifconfig wlan0 up 2>/dev/null
-    sleep 1
+    sleep 2
+
+    # Verify nothing else is holding wlan0
+    killall wpa_supplicant 2>/dev/null
 
     # Start hostapd (takes control of wlan0)
     cat > /tmp/hostapd.conf << HAPEOF
@@ -490,18 +495,31 @@ hw_mode=g
 auth_algs=1
 wpa=0
 HAPEOF
-    hostapd -B /tmp/hostapd.conf
-    # Wait for hostapd to actually be running (up to 5s)
-    _ap_wait=0
-    while [ $_ap_wait -lt 5 ]; do
-        pidof hostapd >/dev/null 2>&1 && break
+
+    # Try up to 3 times with increasing delays
+    _ap_try=0
+    while [ $_ap_try -lt 3 ]; do
+        killall hostapd 2>/dev/null
         sleep 1
-        _ap_wait=$((_ap_wait + 1))
-    done
-    if ! pidof hostapd >/dev/null 2>&1; then
-        log_err "hostapd failed to start — retrying"
         hostapd -B /tmp/hostapd.conf
         sleep 3
+        if pidof hostapd >/dev/null 2>&1; then
+            log "hostapd started (attempt $((_ap_try + 1)))"
+            break
+        fi
+        _ap_try=$((_ap_try + 1))
+        log_err "hostapd failed to start (attempt ${_ap_try}/3)"
+        # Longer reset between retries
+        ifconfig wlan0 down 2>/dev/null
+        sleep 3
+        ifconfig wlan0 up 2>/dev/null
+        sleep 2
+    done
+
+    if ! pidof hostapd >/dev/null 2>&1; then
+        log_err "hostapd failed after 3 attempts — AP mode unavailable"
+        # Still try to stay alive for the web server on whatever interface is up
+        while true; do sleep 3600; done
     fi
 
     # Set IP — retry until it sticks (hostapd may reset the interface)
@@ -533,7 +551,7 @@ APEOF
 
     log "AP mode started (SSID: ${AP_SSID}) — connect to configure WiFi at http://192.168.4.1/"
 
-    # Voice announcement AFTER everything is ready so users don't connect too early
+    # Voice announcement AFTER everything is verified ready
     [ -f "$SD/sounds/wifi_ap_mode.wav" ] && simple_ao -i "$SD/sounds/wifi_ap_mode.wav" -v 50 2>/dev/null
 
     # Monitor loop: restart udhcpd if it dies, re-set IP if lost
