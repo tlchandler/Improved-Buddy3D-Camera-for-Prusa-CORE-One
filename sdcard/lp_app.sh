@@ -471,6 +471,14 @@ else
     [ -z "$AP_SUFFIX" ] && AP_SUFFIX="0000"
     AP_SSID="Buddy3D-${AP_SUFFIX}"
 
+    # Kill the stock eth_monitor.sh for wlan0 — it runs in an infinite loop
+    # and starts udhcpc (DHCP client) every time it sees carrier up, which
+    # fights with our AP setup (clears our static IP, conflicts with udhcpd)
+    for pid in $(ps 2>/dev/null | grep 'eth_monitor.*wlan0\|eth_monitor.sh' | grep -v grep | awk '{print $1}'); do
+        kill -9 "$pid" 2>/dev/null
+    done
+    rm -f /var/run/wlan0flag.pid /var/run/wlan0.pid
+
     # Clean shutdown of station mode — kill everything, fully release wlan0
     killall hostapd 2>/dev/null
     killall wpa_supplicant 2>/dev/null
@@ -481,9 +489,6 @@ else
     sleep 2
     ifconfig wlan0 up 2>/dev/null
     sleep 2
-
-    # Verify nothing else is holding wlan0
-    killall wpa_supplicant 2>/dev/null
 
     # Start hostapd (takes control of wlan0)
     cat > /tmp/hostapd.conf << HAPEOF
