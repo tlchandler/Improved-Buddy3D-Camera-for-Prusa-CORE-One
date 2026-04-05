@@ -465,7 +465,6 @@ if [ -n "$WLAN_IP" ]; then
 else
     log "No WiFi after 30s — entering AP-only mode (lp_app will not start)"
     touch /tmp/buddy_ap_mode
-    [ -f "$SD/sounds/wifi_ap_mode.wav" ] && simple_ao -i "$SD/sounds/wifi_ap_mode.wav" -v 50 2>/dev/null
 
     # Build unique SSID using last 4 hex chars of CPU serial
     AP_SUFFIX=$(grep -i '^Serial' /proc/cpuinfo 2>/dev/null | sed 's/.*: *//' | tail -c 5 | tr 'a-f' 'A-F')
@@ -526,7 +525,6 @@ max_leases 20
 pidfile /tmp/udhcpd.pid
 option subnet 255.255.255.0
 option router 192.168.4.1
-option dns 192.168.4.1
 option lease 3600
 APEOF
     mkdir -p /var/lib/misc
@@ -534,6 +532,9 @@ APEOF
     udhcpd /tmp/udhcpd_ap.conf
 
     log "AP mode started (SSID: ${AP_SSID}) — connect to configure WiFi at http://192.168.4.1/"
+
+    # Voice announcement AFTER everything is ready so users don't connect too early
+    [ -f "$SD/sounds/wifi_ap_mode.wav" ] && simple_ao -i "$SD/sounds/wifi_ap_mode.wav" -v 50 2>/dev/null
 
     # Monitor loop: restart udhcpd if it dies, re-set IP if lost
     while true; do

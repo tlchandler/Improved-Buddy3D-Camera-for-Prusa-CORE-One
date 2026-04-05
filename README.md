@@ -80,7 +80,11 @@ If the camera cannot connect to WiFi within 30 seconds of booting, it automatica
 | Camera IP | `192.168.4.1` |
 | DHCP range | `192.168.4.100` - `192.168.4.200` |
 
+The camera plays a voice announcement when AP mode is ready. Wait for the announcement before connecting -- the access point, DHCP server, and web server must all be running before clients can connect successfully.
+
 Connect to the `Buddy3D-XXXX` network from your phone or laptop, then open `http://192.168.4.1/` to access the web UI and configure your WiFi credentials. Once saved, reboot the camera and it will connect to your network normally.
+
+**Android users:** Android may warn that the network has "no internet access" and route your traffic through mobile data instead. When you see this warning, tap **"Use this network anyway"** (or similar). If the web UI still doesn't load, **disable mobile data temporarily**, then navigate to `http://192.168.4.1/`. Re-enable mobile data after configuring WiFi and rebooting the camera.
 
 ## Removing the SD Card
 
