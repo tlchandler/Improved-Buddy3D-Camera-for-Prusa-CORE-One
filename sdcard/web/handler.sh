@@ -106,7 +106,7 @@ esac
 if [ -f /tmp/buddy_ap_mode ] && [ "$REQUEST_PATH" != "/save/wifi" ]; then
     printf "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
     SAVED_MSG=""
-    case "$QUERY_STRING" in *saved=1) SAVED_MSG='<div style="background:#1a3a1a;border:1px solid #2d5a2d;padding:12px;border-radius:8px;margin-bottom:16px;color:#6fbf73;text-align:center">WiFi credentials saved. Power cycle the camera to connect.</div>' ;; esac
+    case "$QUERY_STRING" in *saved=1) SAVED_MSG='<div style="background:#1a3a1a;border:1px solid #2d5a2d;padding:12px;border-radius:8px;margin-bottom:16px;color:#6fbf73;text-align:center">WiFi credentials saved. Reboot the camera to connect.<br><form method="POST" action="/reboot" style="display:inline;margin-top:8px" onsubmit="return confirm('\''Restart the camera now?'\'')"><button type="submit" style="background:none;border:1px solid #6fbf73;color:#6fbf73;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:.95em;margin-top:8px">Reboot Now</button></form></div>' ;; esac
     cat << 'APPAGE'
 <!DOCTYPE html>
 <html lang="en">
