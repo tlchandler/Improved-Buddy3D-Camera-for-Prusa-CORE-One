@@ -95,12 +95,49 @@ send_headers() { printf "HTTP/1.0 $1\r\nContent-Type: $2\r\nConnection: close\r\
 send_redirect() { printf "HTTP/1.0 302 Found\r\nLocation: $1\r\nConnection: close\r\n\r\n"; }
 
 update_setting() {
-    if grep -q "^$1=" "$SETTINGS" 2>/dev/null; then
-        sed -i "s|^$1=.*|$1=$2|" "$SETTINGS"
-    else
-        echo "$1=$2" >> "$SETTINGS"
+    KEY="$1"
+    VAL="$2"
+    TMP_SETTINGS="${SETTINGS}.tmp.$$"
+
+    # Ensure parent directory and file exist and are writable.
+    [ -d "$SD" ] || return 1
+    [ -f "$SETTINGS" ] || : > "$SETTINGS" 2>/dev/null || return 1
+
+    # Atomic rewrite avoids partial writes and catches read-only storage reliably.
+    if ! awk -F= -v k="$KEY" -v v="$VAL" '
+        BEGIN { done=0 }
+        {
+            if ($1 == k) {
+                print k "=" v
+                done=1
+            } else {
+                print
+            }
+        }
+        END {
+            if (!done) print k "=" v
+        }
+    ' "$SETTINGS" > "$TMP_SETTINGS" 2>/dev/null; then
+        rm -f "$TMP_SETTINGS" 2>/dev/null
+        return 1
     fi
-    touch /tmp/buddy_settings_changed
+
+    if ! mv "$TMP_SETTINGS" "$SETTINGS" 2>/dev/null; then
+        rm -f "$TMP_SETTINGS" 2>/dev/null
+        return 1
+    fi
+
+    touch /tmp/buddy_settings_changed 2>/dev/null
+    return 0
+}
+
+save_redirect() {
+    BASE="$1"
+    if [ "${SAVE_FAILED:-0}" -eq 0 ]; then
+        send_redirect "${BASE}?saved=1"
+    else
+        send_redirect "${BASE}?saved=0&error=write"
+    fi
 }
 
 # ============================================================
@@ -635,30 +672,31 @@ HTMLEOF
 # ---- SAVE SETTINGS ----
 /save/settings)
     web_log "Saving settings"
+    SAVE_FAILED=0
     CN=$(urldecode "$(get_field camera_name)")
-    update_setting camera_name "$CN"
-    update_setting ir_mode "$(get_field ir_mode)"
-    update_setting video_quality "$(get_field video_quality)"
-    update_setting volume "$(get_field volume)"
-    update_setting snapshot_upload_interval "$(get_field snapshot_upload_interval)"
+    update_setting camera_name "$CN" || SAVE_FAILED=1
+    update_setting ir_mode "$(get_field ir_mode)" || SAVE_FAILED=1
+    update_setting video_quality "$(get_field video_quality)" || SAVE_FAILED=1
+    update_setting volume "$(get_field volume)" || SAVE_FAILED=1
+    update_setting snapshot_upload_interval "$(get_field snapshot_upload_interval)" || SAVE_FAILED=1
     PT=$(urldecode "$(get_field prusa_token)")
-    update_setting prusa_token "$PT"
+    update_setting prusa_token "$PT" || SAVE_FAILED=1
     SR=$(urldecode "$(get_field scheduled_reboot)")
-    update_setting scheduled_reboot "$SR"
-    update_setting audio_announcements "$(get_field audio_announcements)"
+    update_setting scheduled_reboot "$SR" || SAVE_FAILED=1
+    update_setting audio_announcements "$(get_field audio_announcements)" || SAVE_FAILED=1
 
     # Checkboxes: present in BODY if checked, absent if unchecked
     RTSP_VAL=$(get_field rtsp_server_mode)
     [ -z "$RTSP_VAL" ] && RTSP_VAL=0
-    update_setting rtsp_server_mode "$RTSP_VAL"
+    update_setting rtsp_server_mode "$RTSP_VAL" || SAVE_FAILED=1
 
     CE=$(get_field cloud_enabled)
     [ -z "$CE" ] && CE=0
-    update_setting cloud_enabled "$CE"
+    update_setting cloud_enabled "$CE" || SAVE_FAILED=1
 
     OE=$(get_field ota_updates_enabled)
     [ -z "$OE" ] && OE=0
-    update_setting ota_updates_enabled "$OE"
+    update_setting ota_updates_enabled "$OE" || SAVE_FAILED=1
 
     # Apply cloud and OTA hosts
     CLOUD_HOSTS="connect.prusa3d.com camera-signaling.prusa3d.com timezone.prusa3d.com prusa3d.pool.ntp.org"
@@ -677,7 +715,8 @@ HTMLEOF
     mount -o remount,ro / 2>/dev/null
 
     sync
-    send_redirect "/settings?saved=1"
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist one or more settings to $SETTINGS"
+    save_redirect "/settings"
     ;;
 
 # ---- CAPTURE PAGE ----
@@ -953,14 +992,16 @@ HTMLEOF
 # ---- SAVE TIMELAPSE ----
 /save/timelapse)
     web_log "Saving timelapse settings"
+    SAVE_FAILED=0
     TLE=$(get_field timelapse_enabled)
     TLI=$(get_field timelapse_interval)
     [ -z "$TLE" ] && TLE=0
     [ -z "$TLI" ] && TLI=60
-    update_setting timelapse_enabled "$TLE"
-    update_setting timelapse_interval "$TLI"
+    update_setting timelapse_enabled "$TLE" || SAVE_FAILED=1
+    update_setting timelapse_interval "$TLI" || SAVE_FAILED=1
     sync
-    send_redirect "/capture?saved=1"
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist timelapse settings to $SETTINGS"
+    save_redirect "/capture"
     ;;
 
 # ---- SNAPSHOT IMAGE ----
@@ -978,18 +1019,20 @@ HTMLEOF
 # ---- SAVE PRINT SETTINGS ----
 /save/print)
     web_log "Saving print timelapse settings"
+    SAVE_FAILED=0
     for key in pt_enabled pt_capture_mode pt_interval_seconds pt_port; do
         VAL=$(get_field "$key")
         [ -z "$VAL" ] && continue
-        update_setting "$key" "$VAL"
+        update_setting "$key" "$VAL" || SAVE_FAILED=1
     done
     # Handle unchecked toggle
-    echo "$BODY" | grep -q "pt_enabled=" || update_setting pt_enabled 0
+    echo "$BODY" | grep -q "pt_enabled=" || update_setting pt_enabled 0 || SAVE_FAILED=1
     # Signal the running binary to reload config
     PID=$(ps 2>/dev/null | grep "print_timelapse" | grep -v grep | awk '{print $1}')
     [ -n "$PID" ] && kill -HUP "$PID" 2>/dev/null
     sync
-    send_redirect "/capture?saved=1"
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist print settings to $SETTINGS"
+    save_redirect "/capture"
     ;;
 
 # ---- NETWORK PAGE ----
@@ -1116,25 +1159,28 @@ HTMLEOF
 # ---- SAVE NETWORK ----
 /save/network)
     web_log "Saving network settings"
+    SAVE_FAILED=0
     for key in ip_mode static_ip static_mask static_gateway static_dns ntp_server; do
         VAL=$(get_field "$key")
         VAL=$(urldecode "$VAL")
         [ -z "$VAL" ] && continue
-        update_setting "$key" "$VAL"
+        update_setting "$key" "$VAL" || SAVE_FAILED=1
     done
     sync
-    send_redirect "/network?saved=1"
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist network settings to $SETTINGS"
+    save_redirect "/network"
     ;;
 
 # ---- SAVE WIFI ----
 /save/wifi)
     web_log "Saving WiFi settings"
+    SAVE_FAILED=0
     W_SSID=$(urldecode "$(get_field wifi_ssid)")
     W_PASS=$(urldecode "$(get_field wifi_password)")
     if [ -n "$W_SSID" ]; then
         # Save to buddy_settings (persists across reboots)
-        update_setting wifi_ssid "$W_SSID"
-        [ -n "$W_PASS" ] && update_setting wifi_password "$W_PASS"
+        update_setting wifi_ssid "$W_SSID" || SAVE_FAILED=1
+        [ -n "$W_PASS" ] && update_setting wifi_password "$W_PASS" || SAVE_FAILED=1
         # Update the live wpa_supplicant config
         WPA_CONF="/tmp/config/wpa_supplicant.conf"
         if [ -n "$W_PASS" ]; then
@@ -1170,10 +1216,11 @@ WPAEOF
         [ ! -f /tmp/buddy_ap_mode ] && wpa_cli -i wlan0 reconfigure 2>/dev/null
     fi
     sync
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist WiFi settings to $SETTINGS"
     if [ -f /tmp/buddy_ap_mode ]; then
-        send_redirect "/?saved=1"
+        save_redirect "/"
     else
-        send_redirect "/network?saved=1"
+        save_redirect "/network"
     fi
     ;;
 
@@ -1234,22 +1281,26 @@ HTMLEOF
 # ---- SAVE WEB AUTH ----
 /save/webauth)
     web_log "Updating web authentication"
+    SAVE_FAILED=0
     WU=$(urldecode "$(get_field web_username)")
     WP=$(urldecode "$(get_field web_password)")
-    update_setting web_username "$WU"
-    update_setting web_password "$WP"
+    update_setting web_username "$WU" || SAVE_FAILED=1
+    update_setting web_password "$WP" || SAVE_FAILED=1
     sync
-    send_redirect "/security?saved=1"
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist web auth settings to $SETTINGS"
+    save_redirect "/security"
     ;;
 
 # ---- SAVE SECURITY (telnet) ----
 /save/security)
     web_log "Saving security settings"
+    SAVE_FAILED=0
     TE=$(get_field telnet_enabled)
     [ -z "$TE" ] && TE=0
-    update_setting telnet_enabled "$TE"
+    update_setting telnet_enabled "$TE" || SAVE_FAILED=1
     sync
-    send_redirect "/security?saved=1"
+    [ "$SAVE_FAILED" -eq 1 ] && web_log "ERROR: Failed to persist security settings to $SETTINGS"
+    save_redirect "/security"
     ;;
 
 
