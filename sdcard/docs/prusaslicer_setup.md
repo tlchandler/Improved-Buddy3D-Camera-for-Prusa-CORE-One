@@ -108,8 +108,8 @@ This five-second dwell happens once at completion, not after every layer. The
 camera records `{total_layer_count}` as the final completed-layer count. The
 following original End G-code can then shut down and park the printer as usual.
 A cancelled or power-interrupted print cannot send this marker; its session
-remains open, but the next `START` always closes it and begins a new uniquely
-named session.
+remains open until the next `START` closes it and begins a new uniquely named
+session, or until 48 hours pass without a `START` or `LAYER` marker.
 
 ## Step 4 — Add the Lightweight After-Layer Marker
 
@@ -192,12 +192,14 @@ You can now select this profile for any print that should trigger timelapse capt
 | Print is active but Frames stays at 0 | Check **Capture Phase**. If it says "Waiting for layer marker," verify the after-layer block is present and uses `M331 gcode` before `M118`. |
 | Last Capture shows an error | Open the print timelapse log. The camera skips failed fresh captures instead of copying a stale preview image. |
 | Print head is visible or moving | This is expected with the minimal marker block. Use the optional parked-head block for more consistent frames, and adjust its X/Y coordinate for your camera position. |
-| A cancelled print still appears active | This is expected with marker-only state. The next print's `START` closes that session and begins a fresh one; frames are never merged or overwritten. |
+| A cancelled print still appears active | This is expected with marker-only state. The next print's `START` closes that session and begins a fresh one; frames are never merged or overwritten. Otherwise the session closes automatically after 48 hours without a `START` or `LAYER` marker. |
 
 If you use **interval mode**, omit the entire after-layer block. Interval mode
 still requires the `START` and `COMPLETE` blocks, but cannot coordinate captures
 with a parked head. If a print is interrupted without `COMPLETE`, timed captures
-continue until the next `START`, listener restart, or feature disable. The
+continue until the next `START`, listener restart, feature disable, or the
+48-hour session timeout. Because interval mode receives no layer markers, a
+single print longer than 48 hours is also closed at that point. The
 optional parked-head layer block is recommended when keeping the print head out
 of every frame matters.
 
