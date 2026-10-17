@@ -1,6 +1,6 @@
 # Buddy3D Camera for CORE One Custom Firmware Overlay
 
-**Version 0.2.1**
+**Version 0.2.2**
 
 A set of SD card files that replace the cloud-dependent behavior of the **Prusa Buddy3D Camera** (Core One) with a fully local, self-hosted system. The camera hardware is untouched -- all modifications live on a removable microSD card. Remove the card and reboot to restore factory behavior.
 
@@ -109,41 +109,120 @@ This works because `lp_app.sh` restores factory configuration files every boot b
 
 The camera can automatically capture a snapshot at every layer change (or at a timed interval) during a print. This works by listening for UDP metrics that the Prusa Core One can stream over your local network.
 
+Layer capture uses the explicit `M118` marker proposed in [issue #2](https://github.com/tlchandler/Improved-Buddy3D-Camera-for-Prusa-CORE-One/issues/2), implemented directly on the camera without the synthetic-Z relay.
+
 ### How It Works
 
 1. You add a few lines of G-code to your PrusaSlicer printer profile
-2. When a print starts, the printer streams `is_printing` and `pos_z` metrics to the camera
-3. The `print_timelapse` binary detects print start/end and layer changes
-4. Snapshots are saved as numbered JPEG frames in a session folder on the SD card
+2. The printer sends explicit `START`, `LAYER`, and `COMPLETE` markers
+3. The `print_timelapse` binary uses only those markers to manage the session
+4. It captures a fresh frame for each layer and completion marker
+5. Snapshots are saved as numbered JPEG frames in a session folder on the SD card
 
-### PrusaSlicer Setup
+### Start G-code
 
 Add the following to the **end** of your **Start G-code** in PrusaSlicer (Printer Settings > Custom G-code):
 
 ```gcode
-; === Camera Timelapse Setup ===
+; === Camera Timelapse Start ===
 M334 <camera_ip> 8514 13514
-M331 is_printing
-M331 pos_z
+M331 gcode
+M118 BUDDY_TIMELAPSE_START:{input_filename_base}
+G4 P100
+M118 BUDDY_TIMELAPSE_START:{input_filename_base}
+M332 gcode
 ```
 
 Replace `<camera_ip>` with your camera's IP address.
 
-The first time you print, the printer's LCD will ask you to approve the metrics destination. Tap **Yes**. This only happens once.
+The first time you use a new metrics destination, the printer's LCD will ask you
+to approve it. Tap **Yes**. The `M334` destination persists across reboots.
+`M331` and `M332` enable the G-code metric only for the short marker window.
+The duplicate marker protects against UDP loss. Every new start event creates a
+new session and supersedes an unterminated session from an interrupted print.
+The camera combines its print-time timestamp with `{input_filename_base}` for a
+descriptive, unique directory such as `20260918_143027_gearbox-cover`.
 
-### Optional: Clean Layer Snapshots
+If you are upgrading from the older Z-based setup and have not rebooted the
+printer, run `M332 pos_z` once to stop the old Z stream. A reboot also clears
+that runtime metric selection; the new setup never enables it.
 
-For unobstructed photos at each layer change, add this to your **After layer change G-code**:
+### End G-code
+
+Next, add this at the **beginning** of your **End G-code**, before the existing
+shutdown commands:
 
 ```gcode
+; === Camera Timelapse Complete ===
+G10
+G90
+{if layer_z < max_print_height}G1 Z{z_offset+min(max_layer_z+1, max_print_height)} F720{endif}
+G1 X0 Y210 F9000
+M400
+G4 P500
+M331 gcode
+M118 BUDDY_TIMELAPSE_COMPLETE:{total_layer_count}
+G4 P100
+M118 BUDDY_TIMELAPSE_COMPLETE:{total_layer_count}
+M332 gcode
+G4 P5000
+```
+
+This lifts and parks the head, captures the finished model, and closes the
+session. Its five-second dwell happens once at print completion, not after each
+layer. The three marker types define the complete session lifecycle. If a print
+is interrupted before `COMPLETE`, the next `START` closes its session and
+creates a new, uniquely named one.
+
+### Lightweight Layer Capture
+
+For layer mode, add this to your **After layer change G-code**:
+
+```gcode
+; === Camera Timelapse Layer Capture ===
+M400
+M331 gcode
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+G4 P100
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+M332 gcode
+```
+
+This is the required layer-marker block. `M400` lets the completed layer finish
+physically before the marker is sent, but the printer is free to continue as
+soon as the marker block ends. The camera may therefore catch the print head
+moving into or printing the next layer.
+
+### Parked Layer Capture
+
+For a cleaner, more consistent composition, **replace** the lightweight block
+with this parked-head version:
+
+```gcode
+; === Camera Timelapse Layer Capture with Parking ===
 G10
 G1 X0 Y210 F9000
-G4 P4000
+M400
+G4 P500
+M331 gcode
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+G4 P100
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+M332 gcode
+G4 P5000
 G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
 G11
 ```
 
-This retracts the filament, parks the print head, waits 2 seconds for the camera to capture, returns, and unretracts. The retraction prevents oozing and stringing between the park position and the print. The 4-second pause gives the camera time to capture after Z-hops settle. Adds ~5 seconds per layer.
+“After” is intentional: PrusaSlicer has already raised Z for the upcoming
+layer but has not extruded it yet, giving the parked XY move clearance above
+the layer being photographed.
+
+The optional version retracts and parks the print head, allows vibration to
+settle, and holds it there for five seconds while the camera captures. You can
+shorten or remove that dwell if the extra print time is not worthwhile. The
+duplicate marker protects against UDP loss, and the layer number prevents
+duplicate frames in either version.
 
 See [`sdcard/docs/prusaslicer_setup.md`](sdcard/docs/prusaslicer_setup.md) for the full setup guide.
 

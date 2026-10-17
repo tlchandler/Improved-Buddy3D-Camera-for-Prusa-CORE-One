@@ -281,9 +281,31 @@ sh $SD/web/server.sh &
 log "Web server started (PID $!)"
 
 # ============================================================
+# SNAPSHOT CAPTURE (background loop for live preview)
+# ============================================================
+
+mkdir -p $SD/snapshots $SD/timelapse
+SNAPSHOT_LOCK=/tmp/buddy_snapshot.lock
+rmdir "$SNAPSHOT_LOCK" 2>/dev/null
+
+log "Starting snapshot capture"
+# Copy snapshot_grabber and libjpeg to /tmp (FAT32 has no execute permissions)
+if [ -f "$SD/bin/snapshot_grabber" ]; then
+    cp "$SD/bin/snapshot_grabber" /tmp/snapshot_grabber 2>/dev/null && chmod +x /tmp/snapshot_grabber
+    log "snapshot_grabber copied to /tmp ($(wc -c < /tmp/snapshot_grabber) bytes)"
+fi
+if [ -f "$SD/bin/libjpeg.so.8" ]; then
+    cp "$SD/bin/libjpeg.so.8" /tmp/libjpeg.so.8 2>/dev/null
+    log "libjpeg.so.8 copied to /tmp ($(wc -c < /tmp/libjpeg.so.8) bytes)"
+fi
+
+# ============================================================
 # PRINT TIMELAPSE LISTENER
 # ============================================================
 
+# Start the listener only after the snapshot grabber is ready. The listener
+# takes an on-demand frame for every print capture instead of copying a stale
+# live-preview image.
 PT_ENABLED=$(get_setting pt_enabled "0")
 if [ "$PT_ENABLED" = "1" ]; then
     if [ -f "$SD/bin/print_timelapse" ]; then
@@ -298,26 +320,18 @@ else
     log "Print timelapse disabled"
 fi
 
-# ============================================================
-# SNAPSHOT CAPTURE (background loop for live preview)
-# ============================================================
-
-mkdir -p $SD/snapshots $SD/timelapse
-
-log "Starting snapshot capture"
-# Copy snapshot_grabber and libjpeg to /tmp (FAT32 has no execute permissions)
-if [ -f "$SD/bin/snapshot_grabber" ]; then
-    cp "$SD/bin/snapshot_grabber" /tmp/snapshot_grabber 2>/dev/null && chmod +x /tmp/snapshot_grabber
-    log "snapshot_grabber copied to /tmp ($(wc -c < /tmp/snapshot_grabber) bytes)"
-fi
-if [ -f "$SD/bin/libjpeg.so.8" ]; then
-    cp "$SD/bin/libjpeg.so.8" /tmp/libjpeg.so.8 2>/dev/null
-    log "libjpeg.so.8 copied to /tmp ($(wc -c < /tmp/libjpeg.so.8) bytes)"
-fi
 (
     sleep 20
     while true; do
-        if [ -x /tmp/snapshot_grabber ]; then
+        PT_CAPTURE_STATE=$(grep '^state=' /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_LISTENER_RUNNING=$(ps 2>/dev/null | grep '/tmp/print_timelapse' | grep -v grep | wc -l)
+        PT_CAPTURE_ACTIVE=0
+        case "$PT_CAPTURE_STATE" in
+            PRINTING|FINALIZING) PT_CAPTURE_ACTIVE=1 ;;
+        esac
+        # Print captures get exclusive access to the VI channel. Besides
+        # avoiding contention, this keeps their bounded parking window useful.
+        if { [ "$PT_CAPTURE_ACTIVE" -eq 0 ] || [ "$PT_LISTENER_RUNNING" -eq 0 ]; } && [ -x /tmp/snapshot_grabber ] && mkdir "$SNAPSHOT_LOCK" 2>/dev/null; then
             # Kill after 10s to prevent hung process from blocking the loop
             LD_LIBRARY_PATH=/tmp /tmp/snapshot_grabber /tmp/buddy_snapshot.jpg 2>/dev/null &
             SG_PID=$!
@@ -328,6 +342,7 @@ fi
             done
             kill -0 $SG_PID 2>/dev/null && kill -9 $SG_PID 2>/dev/null
             wait $SG_PID 2>/dev/null
+            rmdir "$SNAPSHOT_LOCK" 2>/dev/null
         fi
         sleep 5
     done

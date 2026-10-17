@@ -60,6 +60,37 @@ urldecode() { printf '%b' "$(echo "$1" | sed 's/+/ /g; s/%\([0-9A-Fa-f][0-9A-Fa-
 
 html_escape() { echo "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'; }
 
+split_print_session() {
+    SESSION_DATE=${1%%_*}
+    SESSION_REST=${1#*_}
+    SESSION_CLOCK=${SESSION_REST%%_*}
+    case "$SESSION_REST" in
+        *_*) SESSION_MODEL=${SESSION_REST#*_} ;;
+        *) SESSION_MODEL="" ;;
+    esac
+
+    case "$SESSION_DATE:$SESSION_CLOCK" in
+        [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]:[0-9][0-9][0-9][0-9][0-9][0-9])
+            SESSION_YEAR=${SESSION_DATE%????}
+            SESSION_MONTH_DAY=${SESSION_DATE#????}
+            SESSION_MONTH=${SESSION_MONTH_DAY%??}
+            SESSION_DAY=${SESSION_MONTH_DAY#??}
+            SESSION_HOUR=${SESSION_CLOCK%????}
+            SESSION_MINUTE_SECOND=${SESSION_CLOCK#??}
+            SESSION_MINUTE=${SESSION_MINUTE_SECOND%??}
+            SESSION_SECOND=${SESSION_MINUTE_SECOND#??}
+            SESSION_TIME="$SESSION_YEAR-$SESSION_MONTH-$SESSION_DAY $SESSION_HOUR:$SESSION_MINUTE:$SESSION_SECOND"
+            ;;
+        *)
+            SESSION_MODEL="$1"
+            SESSION_TIME=""
+            ;;
+    esac
+
+    [ -z "$SESSION_MODEL" ] && SESSION_MODEL="Unnamed print"
+    SESSION_MODEL=$(html_escape "$SESSION_MODEL")
+}
+
 send_headers() { printf "HTTP/1.0 $1\r\nContent-Type: $2\r\nConnection: close\r\n\r\n"; }
 send_redirect() { printf "HTTP/1.0 302 Found\r\nLocation: $1\r\nConnection: close\r\n\r\n"; }
 
@@ -219,6 +250,9 @@ input[type=range]{width:110px;accent-color:#fa6831}
 .stat .value.good{color:#6d8}
 .stat .value.warn{color:#db6}
 .stat .value.bad{color:#d66}
+.print-session{grid-column:1/-1;min-width:0}
+.print-session .session-name{overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
+.session-meta{color:#556;font-size:.72em;margin-top:4px;font-weight:400}
 .log-list{max-height:500px;overflow-y:auto;font-family:"SF Mono",Monaco,Consolas,monospace;font-size:.75em;line-height:1.8}
 .log-entry{padding:4px 8px;border-bottom:1px solid rgba(255,255,255,.03)}
 .log-entry.warn{color:#db6}
@@ -246,7 +280,17 @@ input[type=range]{width:110px;accent-color:#fa6831}
 .media-item .name{color:#ccc}
 .media-item .meta{color:#556;font-size:.82em}
 .media-item .actions{display:flex;gap:6px}
+.print-session-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px}
+.print-session-item .media-info{min-width:0}
+.print-session-item .name{display:block;overflow-wrap:anywhere;word-break:break-word;line-height:1.3}
 .sep{border:0;border-top:1px solid rgba(255,255,255,.06);margin:12px 0}
+@media(max-width:480px){
+  .wrap{padding-left:12px;padding-right:12px}
+  .print-session-item{grid-template-columns:minmax(0,1fr);gap:8px}
+  .print-session-item .actions{width:100%}
+  .print-session-item .actions>a,.print-session-item .actions>form{flex:1}
+  .print-session-item .actions .btn{width:100%}
+}
 </style>
 </head>
 <body>
@@ -329,15 +373,26 @@ case "$REQUEST_PATH" in
     PT_ENABLED=$(get_setting pt_enabled "0")
 
     # Print timelapse status
-    PT_STATE="IDLE" PT_PRINT_ID="" PT_FRAMES="0" PT_LAST_Z="0.00" PT_ELAPSED="0"
+    PT_STATE="IDLE" PT_PRINT_ID="" PT_FRAMES="0" PT_LAST_LAYER="-1" PT_ELAPSED="0"
+    PT_PHASE="idle" PT_CAPTURE_STATUS="idle"
     if [ -f /tmp/print_timelapse_status ]; then
         PT_STATE=$(grep "^state=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
         PT_PRINT_ID=$(grep "^print_id=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
         PT_FRAMES=$(grep "^frame_count=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
-        PT_LAST_Z=$(grep "^last_z=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_LAST_LAYER=$(grep "^last_layer=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
         PT_ELAPSED=$(grep "^elapsed_seconds=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_PHASE=$(grep "^phase=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_CAPTURE_STATUS=$(grep "^capture_status=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
     fi
     [ -z "$PT_STATE" ] && PT_STATE="IDLE"
+    case "$PT_PHASE" in
+        waiting_for_layer) PT_PHASE_LABEL="Waiting for layer marker" ;;
+        interval) PT_PHASE_LABEL="Timed capture" ;;
+        final_capture) PT_PHASE_LABEL="Final capture" ;;
+        *) PT_PHASE_LABEL="Idle" ;;
+    esac
+    case "$PT_LAST_LAYER" in -1|"") PT_LAST_LAYER_LABEL="—" ;; *) PT_LAST_LAYER_LABEL="$PT_LAST_LAYER" ;; esac
+    [ "$PT_CAPTURE_STATUS" = "fresh" ] && PT_CAPTURE_LABEL="Fresh frame" || PT_CAPTURE_LABEL=$(echo "$PT_CAPTURE_STATUS" | tr '_' ' ')
 
     PT_RUNNING="no"
     ps 2>/dev/null | grep -q "print_timelapse" && PT_RUNNING="yes"
@@ -401,6 +456,7 @@ HTMLEOF
 
     # Print timelapse status (if active)
     if [ "$PT_STATE" = "PRINTING" ] || [ "$PT_STATE" = "FINALIZING" ]; then
+        split_print_session "$PT_PRINT_ID"
         PT_STATE_CLASS="warn"
         [ "$PT_STATE" = "FINALIZING" ] && PT_STATE_CLASS="good"
         if [ "$PT_ELAPSED" -gt 0 ] 2>/dev/null; then
@@ -416,11 +472,13 @@ HTMLEOF
 <div class="card">
 <h2>Active Print</h2>
 <div class="stat-grid">
+<div class="stat print-session"><div class="label">Model</div><div class="value session-name">${SESSION_MODEL}</div><div class="session-meta">${SESSION_TIME}</div></div>
 <div class="stat"><div class="label">State</div><div class="value ${PT_STATE_CLASS}">${PT_STATE}</div></div>
-<div class="stat"><div class="label">Session</div><div class="value">${PT_PRINT_ID}</div></div>
 <div class="stat"><div class="label">Frames</div><div class="value">${PT_FRAMES}</div></div>
-<div class="stat"><div class="label">Current Z</div><div class="value">${PT_LAST_Z}mm</div></div>
+<div class="stat"><div class="label">Layers Complete</div><div class="value">${PT_LAST_LAYER_LABEL}</div></div>
 <div class="stat"><div class="label">Elapsed</div><div class="value">${PT_TIME_STR}</div></div>
+<div class="stat"><div class="label">Capture Phase</div><div class="value">${PT_PHASE_LABEL}</div></div>
+<div class="stat"><div class="label">Last Capture</div><div class="value">${PT_CAPTURE_LABEL}</div></div>
 </div>
 </div>
 HTMLEOF
@@ -438,7 +496,7 @@ HTMLEOF
 
 <div class="card">
 <h2>Firmware</h2>
-<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.2.1</span></div>
+<div class="svc"><span>Buddy3D Overlay</span><span style="color:#889">v0.2.2</span></div>
 <div class="svc"><span>Kernel</span><span style="color:#889">${KERNEL}</span></div>
 <div class="svc"><span>System Time</span><span style="color:#889">$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)</span></div>
 </div>
@@ -639,27 +697,33 @@ HTMLEOF
     # Print timelapse settings
     PT_ENABLED=$(get_setting pt_enabled "0")
     PT_MODE=$(get_setting pt_capture_mode "layer")
-    PT_LAYER=$(html_escape "$(get_setting pt_layer_height '0.2')")
-    PT_DEBOUNCE=$(html_escape "$(get_setting pt_debounce_seconds '2.0')")
     PT_INTERVAL_S=$(html_escape "$(get_setting pt_interval_seconds '10.0')")
     PT_PORT=$(html_escape "$(get_setting pt_port '8514')")
-    PT_CONFIRM=$(html_escape "$(get_setting pt_confirmation_count '2')")
-    PT_STALE=$(html_escape "$(get_setting pt_stale_timeout '120')")
-
     PT_CHK="" ; [ "$PT_ENABLED" = "1" ] && PT_CHK="checked"
     PT_LAYER_SEL="" PT_INT_SEL=""
     [ "$PT_MODE" = "interval" ] && PT_INT_SEL="selected" || PT_LAYER_SEL="selected"
 
     # Print timelapse live status
-    PT_STATE="IDLE" PT_PRINT_ID="" PT_FRAMES="0" PT_LAST_Z="0.00" PT_ELAPSED="0"
+    PT_STATE="IDLE" PT_PRINT_ID="" PT_FRAMES="0" PT_LAST_LAYER="-1" PT_ELAPSED="0"
+    PT_PHASE="idle" PT_CAPTURE_STATUS="idle"
     if [ -f /tmp/print_timelapse_status ]; then
         PT_STATE=$(grep "^state=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
         PT_PRINT_ID=$(grep "^print_id=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
         PT_FRAMES=$(grep "^frame_count=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
-        PT_LAST_Z=$(grep "^last_z=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_LAST_LAYER=$(grep "^last_layer=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
         PT_ELAPSED=$(grep "^elapsed_seconds=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_PHASE=$(grep "^phase=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
+        PT_CAPTURE_STATUS=$(grep "^capture_status=" /tmp/print_timelapse_status 2>/dev/null | cut -d= -f2)
     fi
     [ -z "$PT_STATE" ] && PT_STATE="IDLE"
+    case "$PT_PHASE" in
+        waiting_for_layer) PT_PHASE_LABEL="Waiting for layer marker" ;;
+        interval) PT_PHASE_LABEL="Timed capture" ;;
+        final_capture) PT_PHASE_LABEL="Final capture" ;;
+        *) PT_PHASE_LABEL="Idle" ;;
+    esac
+    case "$PT_LAST_LAYER" in -1|"") PT_LAST_LAYER_LABEL="—" ;; *) PT_LAST_LAYER_LABEL="$PT_LAST_LAYER" ;; esac
+    [ "$PT_CAPTURE_STATUS" = "fresh" ] && PT_CAPTURE_LABEL="Fresh frame" || PT_CAPTURE_LABEL=$(echo "$PT_CAPTURE_STATUS" | tr '_' ' ')
 
     if [ "$PT_ELAPSED" -gt 0 ] 2>/dev/null; then
         PT_HOURS=$((PT_ELAPSED / 3600))
@@ -747,12 +811,15 @@ HTMLEOF
 <div class="stat"><div class="label">Listener</div><div class="value$([ "$PT_RUNNING" = "yes" ] && echo ' good' || echo ' bad')">$([ "$PT_RUNNING" = "yes" ] && echo 'Running' || echo 'Stopped')</div></div>
 HTMLEOF
 
-    if [ "$PT_STATE" = "PRINTING" ]; then
+    if [ "$PT_STATE" = "PRINTING" ] || [ "$PT_STATE" = "FINALIZING" ]; then
+        split_print_session "$PT_PRINT_ID"
         cat << HTMLEOF
-<div class="stat"><div class="label">Session</div><div class="value">${PT_PRINT_ID}</div></div>
+<div class="stat print-session"><div class="label">Model</div><div class="value session-name">${SESSION_MODEL}</div><div class="session-meta">${SESSION_TIME}</div></div>
 <div class="stat"><div class="label">Frames</div><div class="value">${PT_FRAMES}</div></div>
-<div class="stat"><div class="label">Current Z</div><div class="value">${PT_LAST_Z}mm</div></div>
+<div class="stat"><div class="label">Layers Complete</div><div class="value">${PT_LAST_LAYER_LABEL}</div></div>
 <div class="stat"><div class="label">Elapsed</div><div class="value">${PT_TIME_STR}</div></div>
+<div class="stat"><div class="label">Capture Phase</div><div class="value">${PT_PHASE_LABEL}</div></div>
+<div class="stat"><div class="label">Last Capture</div><div class="value">${PT_CAPTURE_LABEL}</div></div>
 HTMLEOF
     fi
 
@@ -765,28 +832,16 @@ HTMLEOF
 </div>
 <div class="setting">
 <label>Capture Mode</label>
-<select name="pt_capture_mode" onchange="document.getElementById('layer-opts').style.display=this.value=='layer'?'block':'none';document.getElementById('int-opts').style.display=this.value=='interval'?'block':'none'">
+<select name="pt_capture_mode" onchange="document.getElementById('int-opts').style.display=this.value=='interval'?'block':'none'">
 <option value="layer" ${PT_LAYER_SEL}>Per Layer</option>
 <option value="interval" ${PT_INT_SEL}>Timed Interval</option>
 </select>
-</div>
-<div id="layer-opts" style="display:$([ "$PT_MODE" != "interval" ] && echo 'block' || echo 'none')">
-<div class="setting"><label>Layer Height<span class="hint">mm — snapshot when Z advances by this amount</span></label><input type="text" name="pt_layer_height" value="${PT_LAYER}"></div>
-<div class="setting"><label>Debounce<span class="hint">Seconds Z must be stable (filters Z-hops)</span></label><input type="text" name="pt_debounce_seconds" value="${PT_DEBOUNCE}"></div>
 </div>
 <div id="int-opts" style="display:$([ "$PT_MODE" = "interval" ] && echo 'block' || echo 'none')">
 <div class="setting"><label>Interval<span class="hint">Seconds between snapshots</span></label><input type="text" name="pt_interval_seconds" value="${PT_INTERVAL_S}"></div>
 </div>
 <div class="setting"><label>UDP Port<span class="hint">Port for printer metrics</span></label><input type="text" name="pt_port" value="${PT_PORT}"></div>
 </div>
-
-<details style="margin-top:12px">
-<summary style="color:#7889aa;font-size:.85em;cursor:pointer;padding:8px 0">Advanced Settings</summary>
-<div class="card" style="margin-top:8px">
-<div class="setting"><label>Confirmation Count<span class="hint">Consecutive readings to confirm state change</span></label><input type="text" name="pt_confirmation_count" value="${PT_CONFIRM}"></div>
-<div class="setting"><label>Stale Timeout<span class="hint">Seconds without data before ending session</span></label><input type="text" name="pt_stale_timeout" value="${PT_STALE}"></div>
-</div>
-</details>
 
 <button type="submit" class="btn">Save Print Settings</button>
 <div class="note" style="margin-top:8px">Print timelapse changes require a reboot to take effect (restarts the listener).</div>
@@ -803,25 +858,79 @@ HTMLEOF
 Add these lines to the <b>end</b> of your Start G-code in PrusaSlicer
 (Printer Settings &rarr; Custom G-code &rarr; Start G-code):
 </p>
-<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">; === Camera Timelapse Setup ===
+<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">; === Camera Timelapse Start ===
 M334 ${CAM_IP} 8514 13514
-M331 is_printing
-M331 pos_z</pre>
+M331 gcode
+M118 BUDDY_TIMELAPSE_START:{input_filename_base}
+G4 P100
+M118 BUDDY_TIMELAPSE_START:{input_filename_base}
+M332 gcode</pre>
 <div class="note" style="margin-top:10px">
-First print only: the printer will show a confirmation on the LCD asking you to approve
-the metrics destination. Press <b>Yes</b>. This persists across power cycles.
+The printer asks you to approve a new metrics destination. The destination persists
+across power cycles. The G-code metric is enabled only around each marker. Every
+new <code>START</code> closes an unterminated session and creates a new run; the
+duplicate marker protects against UDP loss.
+</div>
+<div class="note" style="margin-top:10px">
+The camera combines its print-time timestamp with <code>{input_filename_base}</code>
+for a descriptive, unique session directory such as
+<code>20260918_143027_gearbox-cover</code>.
+</div>
+<div class="note" style="margin-top:10px">
+Upgrading from the older Z-based setup without rebooting? Run
+<code>M332 pos_z</code> once, or reboot the printer, to stop the old Z stream.
 </div>
 
-<h2 style="margin-top:16px">Optional: Clean Snapshots</h2>
+<h2 style="margin-top:16px">Completion Marker</h2>
 <p style="font-size:.85em;color:#aab;line-height:1.6;margin-bottom:12px">
-For layer mode: add to <b>After layer change G-code</b> to park the print head during capture:
+Add at the <b>beginning of End G-code</b>, before the existing shutdown commands. This lifts and parks the head, captures the completed model, and closes the session:
 </p>
-<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">G10
+<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">; === Camera Timelapse Complete ===
+G10
+G90
+{if layer_z &lt; max_print_height}G1 Z{z_offset+min(max_layer_z+1, max_print_height)} F720{endif}
 G1 X0 Y210 F9000
-G4 P4000
+M400
+G4 P500
+M331 gcode
+M118 BUDDY_TIMELAPSE_COMPLETE:{total_layer_count}
+G4 P100
+M118 BUDDY_TIMELAPSE_COMPLETE:{total_layer_count}
+M332 gcode
+G4 P5000</pre>
+<div class="note" style="margin-top:10px">The five-second dwell in this completion block occurs only once, at the end of the print. <code>START</code>, <code>LAYER</code>, and <code>COMPLETE</code> define the full session lifecycle. After an interrupted print, the next <code>START</code> closes the unfinished session and begins a separate one. In interval mode, omit the layer block; captures continue after an interruption until the next start or listener restart.</div>
+
+<h2 style="margin-top:16px">Layer Marker (Lightweight)</h2>
+<p style="font-size:.85em;color:#aab;line-height:1.6;margin-bottom:12px">
+Required for layer mode: add this minimal block to <b>After layer change G-code</b>:
+</p>
+<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">; === Camera Timelapse Layer Capture ===
+M400
+M331 gcode
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+G4 P100
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+M332 gcode</pre>
+<div class="note" style="margin-top:10px"><code>M400</code> lets the completed layer finish before the marker, but this block does not wait for the camera. The print head may be visible or moving into the next layer while the fresh image is acquired.</div>
+
+<h2 style="margin-top:16px">Layer Marker (Parked Head)</h2>
+<p style="font-size:.85em;color:#aab;line-height:1.6;margin-bottom:12px">
+For more consistent head-free frames, replace the minimal block with this version. The five-second dwell is optional and may be shortened or removed:
+</p>
+<pre style="background:#1a1a2e;padding:12px;border-radius:6px;font-size:.82em;color:#ccc;overflow-x:auto;line-height:1.6">; === Camera Timelapse Layer Capture with Parking ===
+G10
+G1 X0 Y210 F9000
+M400
+G4 P500
+M331 gcode
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+G4 P100
+M118 BUDDY_TIMELAPSE_LAYER:{layer_num}
+M332 gcode
+G4 P5000
 G1 X{first_layer_print_min[0]} Y{first_layer_print_min[1]} F9000
 G11</pre>
-<div class="note" style="margin-top:10px">G10/G11 retract and unretract to prevent oozing. The 4-second pause gives the camera time to capture after Z-hops settle. Adds ~5 seconds per layer. Skip this if using interval mode.</div>
+<div class="note" style="margin-top:10px">Use <b>After</b>, not Before: PrusaSlicer has already raised Z but has not begun extruding the next layer, giving the optional park move safe clearance. The repeated marker protects against a dropped UDP packet; its layer number prevents duplicate frames.</div>
 </div>
 </details>
 HTMLEOF
@@ -869,7 +978,7 @@ HTMLEOF
 # ---- SAVE PRINT SETTINGS ----
 /save/print)
     web_log "Saving print timelapse settings"
-    for key in pt_enabled pt_capture_mode pt_layer_height pt_debounce_seconds pt_interval_seconds pt_port pt_confirmation_count pt_stale_timeout; do
+    for key in pt_enabled pt_capture_mode pt_interval_seconds pt_port; do
         VAL=$(get_field "$key")
         [ -z "$VAL" ] && continue
         update_setting "$key" "$VAL"
@@ -1238,7 +1347,7 @@ HTMLEOF
     fi
     echo '</div>'
 
-    # Print timelapse sessions — list timelapse dir, filter for session-format names (YYYYMMDD_HHMMSS)
+    # Print timelapse sessions — timestamp-prefixed names (YYYYMMDD_HHMMSS...)
     PT_COUNT=0
     [ -d "$SD/timelapse" ] && PT_COUNT=$(ls -1 "$SD/timelapse/" 2>/dev/null | grep -c '^[0-9]*_[0-9]')
     echo '<div class="card"><h2>Print Timelapses ('"$PT_COUNT"')</h2>'
@@ -1246,7 +1355,8 @@ HTMLEOF
         ls -1 "$SD/timelapse/" 2>/dev/null | grep '^[0-9]*_[0-9]' | sort -r | head -20 | while read SNAME; do
             SDIR="$SD/timelapse/$SNAME"
             SFRAMES=$(ls -1 "$SDIR/" 2>/dev/null | grep -c 'frame_.*\.jpg$')
-            echo "<div class='media-item'><div><span class='name'>${SNAME}</span><br><span class='meta'>${SFRAMES} frames</span></div><span class='actions'><a href='/download/timelapse/${SNAME}' class='btn btn-outline btn-sm'>Download .tar</a><form method='POST' action='/delete/timelapse/${SNAME}' style='display:inline;margin:0' onsubmit='return confirm(\"Delete this session and all ${SFRAMES} frames?\")'><button type='submit' class='btn btn-outline btn-sm btn-danger'>Delete</button></form></span></div>"
+            split_print_session "$SNAME"
+            echo "<div class='media-item print-session-item'><div class='media-info'><span class='name'>${SESSION_MODEL}</span><span class='meta'>${SESSION_TIME} &middot; ${SFRAMES} frames</span></div><span class='actions'><a href='/download/timelapse/${SNAME}' class='btn btn-outline btn-sm'>Download .tar</a><form method='POST' action='/delete/timelapse/${SNAME}' style='display:inline;margin:0' onsubmit='return confirm(\"Delete this session and all ${SFRAMES} frames?\")'><button type='submit' class='btn btn-outline btn-sm btn-danger'>Delete</button></form></span></div>"
         done
     else
         echo '<div style="font-size:.85em;color:#556;padding:8px 0">No print timelapse sessions yet.</div>'
