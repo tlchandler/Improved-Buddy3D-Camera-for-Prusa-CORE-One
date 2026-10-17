@@ -938,7 +938,7 @@ G4 P100
 M118 BUDDY_TIMELAPSE_COMPLETE:{total_layer_count}
 M332 gcode
 G4 P5000</pre>
-<div class="note" style="margin-top:10px">The five-second dwell in this completion block occurs only once, at the end of the print. <code>START</code>, <code>LAYER</code>, and <code>COMPLETE</code> define the full session lifecycle. After an interrupted print, the next <code>START</code> closes the unfinished session and begins a separate one. In interval mode, omit the layer block; captures continue after an interruption until the next start or listener restart.</div>
+<div class="note" style="margin-top:10px">The five-second dwell in this completion block occurs only once, at the end of the print. <code>START</code>, <code>LAYER</code>, and <code>COMPLETE</code> define the full session lifecycle. After an interrupted print, the next <code>START</code> closes the unfinished session and begins a separate one. In interval mode, omit the layer block; captures continue after an interruption until the next start, listener restart, or 48 hours without a start or layer marker.</div>
 
 <h2 style="margin-top:16px">Layer Marker (Lightweight)</h2>
 <p style="font-size:.85em;color:#aab;line-height:1.6;margin-bottom:12px">

@@ -67,6 +67,11 @@
 #define COMPLETE_MARKER    "M118 BUDDY_TIMELAPSE_COMPLETE"
 #define START_DEDUPE_SECS  2
 #define MAX_PRINT_DESCRIPTION 40
+/* Close a session that has seen no START or LAYER marker for this long. A
+   cancelled or power-interrupted print never sends COMPLETE. */
+#ifndef SESSION_TIMEOUT_SECS
+#define SESSION_TIMEOUT_SECS  (48L * 60 * 60)
+#endif
 
 typedef enum { IDLE, PRINTING, FINALIZING } PrintState;
 typedef enum { MODE_LAYER, MODE_INTERVAL } CaptureMode;
@@ -88,6 +93,7 @@ static struct {
     time_t last_frame_time;
     time_t last_status_write;
     time_t last_start_marker_time;
+    time_t last_marker_time;
     time_t print_start_time;
     long last_layer_id;
     int have_last_layer_id;
@@ -526,6 +532,7 @@ static void choose_print_id(time_t start_time, const char *description) {
 static void start_print_session(const char *description) {
     state.state = PRINTING;
     state.print_start_time = time(NULL);
+    state.last_marker_time = state.print_start_time;
     choose_print_id(state.print_start_time, description);
 
     state.frame_counter = 0;
@@ -609,6 +616,7 @@ static void handle_layer_marker(const char *command) {
         LOG_WARN("Ignoring layer marker without an active print session");
         return;
     }
+    state.last_marker_time = time(NULL);
 
     if (has_layer_id && state.have_last_layer_id &&
         layer_id == state.last_layer_id) {
@@ -674,6 +682,15 @@ static void check_interval_capture(void) {
     if (interval_due && retry_ready && take_snapshot(-1, 0) == 0) {
         state.last_interval_snap = time(NULL);
     }
+}
+
+static void check_session_timeout(void) {
+    if (state.state != PRINTING) return;
+    if (difftime(time(NULL), state.last_marker_time) < SESSION_TIMEOUT_SECS) return;
+
+    LOG_WARN("No print markers for %ld hours — closing session %s",
+             SESSION_TIMEOUT_SECS / 3600, state.print_id);
+    end_print_session("marker timeout");
 }
 
 /* ============================================================
@@ -818,6 +835,7 @@ int main(void) {
         }
 
         check_interval_capture();
+        check_session_timeout();
         if (state.state != IDLE &&
             difftime(time(NULL), state.last_status_write) >= 5.0) {
             write_status();
