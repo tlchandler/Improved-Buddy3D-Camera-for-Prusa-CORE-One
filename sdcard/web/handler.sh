@@ -104,8 +104,9 @@ update_setting() {
     [ -f "$SETTINGS" ] || : > "$SETTINGS" 2>/dev/null || return 1
 
     # Atomic rewrite avoids partial writes and catches read-only storage reliably.
-    if ! awk -F= -v k="$KEY" -v v="$VAL" '
-        BEGIN { done=0 }
+    # Pass the value via the environment: awk -v would interpret backslash escapes.
+    if ! VAL="$VAL" awk -F= -v k="$KEY" '
+        BEGIN { done=0; v=ENVIRON["VAL"] }
         {
             if ($1 == k) {
                 print k "=" v
@@ -1180,7 +1181,9 @@ HTMLEOF
     if [ -n "$W_SSID" ]; then
         # Save to buddy_settings (persists across reboots)
         update_setting wifi_ssid "$W_SSID" || SAVE_FAILED=1
-        [ -n "$W_PASS" ] && update_setting wifi_password "$W_PASS" || SAVE_FAILED=1
+        if [ -n "$W_PASS" ]; then
+            update_setting wifi_password "$W_PASS" || SAVE_FAILED=1
+        fi
         # Update the live wpa_supplicant config
         WPA_CONF="/tmp/config/wpa_supplicant.conf"
         if [ -n "$W_PASS" ]; then
