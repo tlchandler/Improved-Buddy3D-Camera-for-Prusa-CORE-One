@@ -32,6 +32,11 @@ log "=========================================="
 # HELPERS
 # ============================================================
 
+# The camera's BusyBox (rootfs since FW 3.1.6) has no rmdir applet. Without
+# this fallback the snapshot lock dir is never released and snapshot.jpg
+# (and every timelapse frame) stays frozen.
+command -v rmdir >/dev/null 2>&1 || rmdir() { rm -r "$@"; }
+
 get_setting() {
     VAL=$(grep "^$1=" "$SETTINGS" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '\r')
     [ -z "$VAL" ] && VAL="$2"
@@ -82,6 +87,7 @@ if [ ! -f "$SETTINGS" ]; then
 
 [config]
 rtsp_server_mode=2
+webrtc_mode=1
 cloud_enabled=1
 video_quality=6
 volume=40
@@ -120,6 +126,13 @@ while IFS='=' read -r key val; do
         *) apply_setting "$key" "$val" ;;
     esac
 done < "$SETTINGS"
+
+# lp_app migrates configs without webrtc_mode on startup by setting
+# webrtc_mode=1 AND rtsp_server_mode=1 (RTSP off). The factory config has no
+# webrtc_mode, so set it unless the user chose a value, to keep RTSP as set.
+if ! grep -q "^webrtc_mode=" "$SETTINGS" 2>/dev/null; then
+    apply_setting webrtc_mode 1
+fi
 
 # ============================================================
 # WIFI CREDENTIALS (apply saved SSID/password to wpa_supplicant)
@@ -540,5 +553,10 @@ fi
 
 log "Starting lp_app (main camera application)"
 sync
-lp_app --noshell --log2file $SD/logs
-log_err "lp_app exited unexpectedly (exit code: $?)"
+# Run in the background like the stock RkLunch.sh. Running it in the
+# foreground keeps the sysinit rcS from finishing, and BusyBox init ignores a
+# plain "reboot" until it does, so the OTA updater hangs at "updating, please
+# do not turn off the power" forever.
+lp_app --noshell --log2file $SD/logs &
+log "lp_app started in background (PID $!)"
+exit 0
